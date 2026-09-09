@@ -487,15 +487,18 @@
       const btn = document.getElementById('dailyBtn');
       btn.disabled = true;
 
-      try {
-        const data = await api('/api/daily', { method: 'POST' });
-        updateBalance(data.balance);
-        showMessage('🎉 Получено 2500 листиков!');
-        btn.textContent = 'Бонус получен';
-      } catch (e) {
-        showMessage(e.message);
-        btn.disabled = false;
-      }
+         try {
+      const data = await api('/api/daily', {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+
+      updateBalance(data.balance);
+      showMessage('🎉 Получено 2500 листиков!');
+      btn.textContent = 'Бонус получен';
+    } catch (e) {
+      showMessage(e.message);
+      btn.disabled = false;
     }
 
     async function loadTasks() {
