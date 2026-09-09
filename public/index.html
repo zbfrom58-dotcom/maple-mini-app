@@ -13,7 +13,7 @@
 .big{font-size:42px;font-weight:900;color:#ffb21c;margin:8px 0}.muted{color:#999;font-size:14px}
 .title{font-size:21px;font-weight:bold;margin:22px 0 12px}button{border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:bold;cursor:pointer;color:#fff;background:#333}
 button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#ff7b00);color:#111;width:100%}.blue{background:#315cff}.green{background:#198754}
-.hidden{display:none!important}.shop-tabs{display:flex;gap:8px;margin-bottom:12px}.shop-tab{flex:1;background:#333;color:#aaa}.shop-tab.active{background:#ffb21c;color:#111}.message{text-align:center;color:#ffb21c;min-height:20px;margin:10px 0}.loading{text-align:center;color:#999;padding:25px}
+.hidden{display:none!important}.crash-number{font-size:64px;font-weight:900;color:#ffb21c;text-align:center;margin:30px 0}.crash-status{text-align:center;color:#aaa;min-height:24px}.bet-input{width:100%;background:#292929;border:1px solid #444;color:#fff;border-radius:12px;padding:14px;font-size:18px;margin:8px 0}.message{text-align:center;color:#ffb21c;min-height:20px;margin:10px 0}.loading{text-align:center;color:#999;padding:25px}
 .task,.shop{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid #333}.task:last-child,.shop:last-child{border-bottom:0}
 .info{flex:1}.reward,.price{font-size:13px;margin-top:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.bombs{grid-template-columns:repeat(6,1fr)}
 .selected{background:#315cff!important}.mines{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:15px}.cell{aspect-ratio:1;padding:0;border-radius:10px;background:#171717;border:1px solid #333;font-size:20px}.cell.open{border-color:#ffb21c}.cell.bomb{background:#7b2020}
@@ -35,44 +35,45 @@ button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#
 <section id="tasksPage" class="hidden"><div class="title">📋 Задания</div><div id="tasksList" class="card"><div class="loading">Загрузка заданий...</div></div></section>
 
 <section id="minesPage" class="hidden"><div class="title">💣 МИНЫ</div><div class="card">
-<div class="center"><div class="muted">Баланс</div><div id="gameBalance" class="big">0</div></div>
-<div class="title" style="font-size:16px">Ставка</div><div class="grid"><button onclick="setBet(50)" id="bet50">50</button><button onclick="setBet(500)" id="bet500">500</button><button onclick="setBet(1000)" id="bet1000">1000</button><button onclick="setBet(5000)" id="bet5000">5000</button></div>
+<div class="title" style="font-size:16px">Ставка в листиках</div>
+<input id="betInput" class="bet-input" type="number" min="1" value="50" placeholder="Введите свою ставку">
+<div class="grid"><button onclick="setBet(50)" id="bet50">50</button><button onclick="setBet(500)" id="bet500">500</button><button onclick="setBet(1000)" id="bet1000">1000</button><button onclick="setBet(5000)" id="bet5000">5000</button></div>
 <div class="title" style="font-size:16px">Количество бомб</div><div id="bombGrid" class="grid bombs"></div>
 <button id="startBtn" class="primary" style="margin-top:16px" onclick="startGame()">НАЧАТЬ ИГРУ</button>
 <div id="gameArea" class="hidden"><div class="muted center" style="margin-top:18px">Нажимай на клетки. Не попадись на бомбу!</div><div id="mineGrid" class="mines"></div><button class="primary" style="margin-top:16px" onclick="cashOut()">ЗАБРАТЬ ВЫИГРЫШ</button></div>
 </div></section>
 
+<section id="crashPage" class="hidden"><div class="title">🚀 Краш</div><div class="card">
+<div class="crash-number" id="crashMultiplier">1.00x</div>
+<div class="crash-status" id="crashStatus">Следующий раунд скоро начнётся</div>
+<div class="title" style="font-size:16px">Ставка в листиках</div>
+<input id="crashBetInput" class="bet-input" type="number" min="1" value="50" placeholder="Введите ставку">
+<div class="grid"><button onclick="setCrashBet(50)">50</button><button onclick="setCrashBet(500)">500</button><button onclick="setCrashBet(1000)">1000</button><button onclick="setCrashBet(5000)">5000</button></div>
+<button id="crashBetBtn" class="primary" style="margin-top:16px" onclick="placeCrashBet()">СДЕЛАТЬ СТАВКУ</button>
+<button id="crashCashoutBtn" class="green hidden" style="width:100%;margin-top:10px" onclick="cashoutCrash()">ЗАБРАТЬ ВЫИГРЫШ</button>
+</div></section>
 <section id="shopPage" class="hidden">
 <div class="title">🛒 Магазин</div>
 
-<div class="shop-tabs">
-  <button id="leavesTab" class="shop-tab active" onclick="showShopTab('leaves')">🍁 Листики</button>
-  <button id="nftTab" class="shop-tab" onclick="showShopTab('nft')">🎁 NFT-подарки</button>
+<div class="card">
+  <div class="center" style="margin-bottom:15px">
+    <div class="muted">Покупка листиков</div>
+    <b style="font-size:24px;display:block;margin-top:5px">⭐ Telegram Stars</b>
+  </div>
+  <div id="shopList"><div class="loading">Загрузка магазина...</div></div>
 </div>
 
-<div id="leavesShopTab">
-  <div class="card">
-    <div class="center" style="margin-bottom:15px">
-      <div class="muted">Покупка листиков</div>
-      <b style="font-size:24px;display:block;margin-top:5px">⭐ Telegram Stars</b>
-    </div>
-    <div id="shopList"><div class="loading">Загрузка магазина...</div></div>
+<div class="title">🎁 NFT-подарки</div>
+<div class="card">
+  <div class="muted" style="margin-bottom:12px">
+    Покупай подарки за кленовые листики. Цена каждого подарка — 2 500 000 листиков.
   </div>
-</div>
-
-<div id="nftShopTab" class="hidden">
-  <div class="card">
-    <div class="muted" style="margin-bottom:12px">
-      Покупай подарки за кленовые листики. Цена каждого подарка — 2 500 000 листиков.
-    </div>
-    <div id="nftList"></div>
-  </div>
+  <div id="nftList"></div>
 </div>
 </section>
-<section id="historyPage" class="hidden"><div class="title">📜 История</div><div class="card"><div class="muted center">История операций появится здесь.</div></div></section>
 </div>
 
-<div class="nav"><button class="active" onclick="showPage('homePage',this)">🏠<br>Главная</button><button onclick="showPage('tasksPage',this)">📋<br>Задания</button><button onclick="showPage('minesPage',this)">💣<br>Мины</button><button onclick="showPage('shopPage',this)">🛒<br>Магазин</button><button onclick="showPage('historyPage',this)">📜<br>История</button></div>
+<div class="nav"><button class="active" onclick="showPage('homePage',this)">🏠<br>Главная</button><button onclick="showPage('tasksPage',this)">📋<br>Задания</button><button onclick="showPage('minesPage',this)">💣<br>Мины</button><button onclick="showPage('shopPage',this)">🛒<br>Магазин</button><button onclick="showPage('crashPage',this)">🚀<br>Краш</button></div>
 
 <script>
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
@@ -90,7 +91,7 @@ async function claimTask(id,b){b.disabled=true;try{const d=await api('/api/tasks
 async function loadShop(){
   try{
     const d=await api('/api/shop');
-    const a=Array.from(new Map((d.packages||[]).map(p=>[Number(p.stars),p])).values()).sort((x,y)=>Number(x.stars)-Number(y.stars));
+    const a=d.packages||[];
     document.getElementById('shopList').innerHTML=a.length
       ? a.map(p=>`<div class="shop"><div class="info"><b>🍁 ${Number(p.leaves).toLocaleString('ru-RU')} листиков</b><div class="price">⭐ ${p.stars} Stars</div></div><button class="blue" onclick="buyPackage(${p.stars})">Купить</button></div>`).join('')
       : '<div class="muted center">Пакеты пока не настроены</div>';
@@ -99,7 +100,7 @@ async function loadShop(){
   }catch(e){msg(e.message)}
 }
 
-let nftProducts=[
+const nftProducts=[
   {id:'vice-143868',name:'Vice Cream #143868',url:'https://t.me/nft/ViceCream-143868'},
   {id:'pool-67988',name:'Pool Float #67988',url:'https://t.me/nft/PoolFloat-67988'},
   {id:'vice-314974',name:'Vice Cream #314974',url:'https://t.me/nft/ViceCream-314974'}
@@ -116,18 +117,6 @@ function loadNfts(){
       <button class="blue" onclick="buyNft('${n.id}')">Купить</button>
     </div>
   `).join('');
-}
-
-function showShopTab(tab){
-  const leaves=document.getElementById('leavesShopTab');
-  const nft=document.getElementById('nftShopTab');
-  const leavesBtn=document.getElementById('leavesTab');
-  const nftBtn=document.getElementById('nftTab');
-  const isNft=tab==='nft';
-  leaves.classList.toggle('hidden',isNft);
-  nft.classList.toggle('hidden',!isNft);
-  leavesBtn.classList.toggle('active',!isNft);
-  nftBtn.classList.toggle('active',isNft);
 }
 
 function viewNft(url){
@@ -148,7 +137,7 @@ async function buyNft(id){
   }
 }
 async function buyPackage(stars){try{const d=await api('/api/shop/invoice',{method:'POST',body:JSON.stringify({stars})});if(!d.invoiceLink)throw Error('Ссылка на оплату не получена');if(tg?.openInvoice){tg.openInvoice(d.invoiceLink,s=>{if(s==='paid'){msg('⭐ Оплата прошла!');setTimeout(loadUser,1500)}else if(s==='cancelled')msg('Оплата отменена');else if(s==='failed')msg('Оплата не прошла')})}else window.open(d.invoiceLink,'_blank')}catch(e){msg(e.message)}}
-function setBet(v){bet=v;document.querySelectorAll('.grid:not(.bombs) button').forEach(b=>b.classList.remove('selected'));document.getElementById('bet'+v).classList.add('selected')}
+function setBet(v){bet=Number(v)||0;const input=document.getElementById('betInput');if(input)input.value=bet;document.querySelectorAll('#minesPage .grid:not(.bombs) button').forEach(b=>b.classList.remove('selected'));const preset=document.getElementById('bet'+bet);if(preset)preset.classList.add('selected')}
 function setMines(v){mines=v;document.querySelectorAll('.bombs button').forEach(b=>b.classList.remove('selected'));document.getElementById('bomb'+v).classList.add('selected')}
 function initBombs(){const g=document.getElementById('bombGrid');for(let i=1;i<=12;i++){const b=document.createElement('button');b.id='bomb'+i;b.textContent=i;b.onclick=()=>setMines(i);if(i===3)b.classList.add('selected');g.appendChild(b)}}
 async function startGame(){if(gameActive)return;try{const d=await api('/api/games/mines',{method:'POST',body:JSON.stringify({bet,mines})});gameId=d.gameId;gameActive=true;updateBalance(d.balance);document.getElementById('startBtn').disabled=true;document.getElementById('gameArea').classList.remove('hidden');createGrid()}catch(e){msg(e.message)}}
@@ -156,8 +145,14 @@ function createGrid(){const g=document.getElementById('mineGrid');g.innerHTML=''
 async function openCell(cell,b){if(!gameActive||b.classList.contains('open'))return;try{const d=await api('/api/games/mines/'+gameId+'/open',{method:'POST',body:JSON.stringify({cell})});updateBalance(d.balance);if(d.lost){b.classList.add('bomb');b.textContent='💣';gameActive=false;msg('💥 Ты попался на бомбу!');endGame();return}b.classList.add('open');b.textContent='🍁';msg('Множитель: x'+Number(d.state.multiplier).toFixed(2))}catch(e){msg(e.message)}}
 function cashOut(){if(!gameActive)return;gameActive=false;msg('🍁 Выигрыш зафиксирован!');endGame()}
 function endGame(){document.getElementById('startBtn').disabled=false}
+let crashTimer=null,crashRound=false,crashBet=50,crashCashed=false,crashMultiplier=1;
+function setCrashBet(v){crashBet=v;document.getElementById('crashBetInput').value=v}
+function startCrashRound(){crashRound=true;crashCashed=false;crashMultiplier=1;const crashAt=1+Math.random()*99;document.getElementById('crashMultiplier').textContent='1.00x';document.getElementById('crashStatus').textContent='Раунд начался';document.getElementById('crashBetBtn').disabled=false;document.getElementById('crashCashoutBtn').classList.add('hidden');const started=Date.now();clearInterval(crashTimer);crashTimer=setInterval(()=>{const elapsed=(Date.now()-started)/1000;crashMultiplier=Math.min(100,1+elapsed*elapsed*1.7);if(crashMultiplier>=crashAt){crashMultiplier=crashAt;document.getElementById('crashMultiplier').textContent=crashMultiplier.toFixed(2)+'x';document.getElementById('crashStatus').textContent='💥 Краш! Следующий раунд через 5 секунд';crashRound=false;clearInterval(crashTimer);setTimeout(startCrashRound,5000)}else document.getElementById('crashMultiplier').textContent=crashMultiplier.toFixed(2)+'x'},100)}
+function placeCrashBet(){const v=Number(document.getElementById('crashBetInput').value);if(!Number.isFinite(v)||v<=0){msg('Введите корректную ставку');return}crashBet=v;crashCashed=false;document.getElementById('crashBetBtn').disabled=true;document.getElementById('crashCashoutBtn').classList.remove('hidden');msg('🍁 Ставка принята')}
+function cashoutCrash(){if(!crashRound||crashCashed)return;crashCashed=true;const win=Math.floor(crashBet*crashMultiplier);document.getElementById('crashCashoutBtn').classList.add('hidden');msg('🍁 Выигрыш: '+win.toLocaleString('ru-RU')+' листиков')}
+
 function showPage(id,b){document.querySelectorAll('section').forEach(s=>s.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
-initBombs();setBet(50);loadUser();loadTasks();loadShop();
+initBombs();setBet(50);startCrashRound();loadUser();loadTasks();loadShop();
 </script>
 </body>
 </html>
