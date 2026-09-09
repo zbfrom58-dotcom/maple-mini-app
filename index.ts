@@ -12,7 +12,12 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+const botToken = process.env.BOT_TOKEN;
 const adminKey = process.env.ADMIN_KEY || 'change_me';
+
+if (!botToken) {
+  throw new Error('BOT_TOKEN не найден в переменных Railway');
+}
 
 app.register(fastifyStatic, {
   root: path.join(process.cwd(), 'public'),
@@ -22,7 +27,34 @@ app.get('/', async (_, reply) => {
   return reply.sendFile('index.html');
 });
 
-// Получаем Telegram ID пользователя
+// Создаём таблицу платежей при запуске
+async function prepareDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_orders (
+      id BIGSERIAL PRIMARY KEY,
+      telegram_id TEXT NOT NULL,
+      payload TEXT UNIQUE NOT NULL,
+      stars INTEGER NOT NULL,
+      leaves BIGINT NOT NULL,
+      telegram_payment_charge_id TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      paid_at TIMESTAMPTZ
+    )
+  `);
+
+  await pool.query(`
+    INSERT INTO shop_packages (leaves, stars, active)
+    VALUES
+      (100000, 50, true),
+      (220000, 100, true),
+      (1200000, 500, true),
+      (3000000, 1000, true)
+    ON CONFLICT DO NOTHING
+  `);
+}
+
+// Получаем настоящий Telegram ID
 function auth(req: any): string {
   const tgId = req.headers['x-telegram-id'];
 
@@ -38,9 +70,8 @@ function auth(req: any): string {
   return String(tgId);
 }
 
-// Получаем или создаём пользователя.
-// ON CONFLICT предотвращает ошибку duplicate key.
-async function user(tg: string) {
+// Получаем или создаём пользователя
+async function user(telegramId: string) {
   const result = await pool.query(
     `
     INSERT INTO users (telegram_id, balance)
@@ -49,7 +80,7 @@ async function user(tg: string) {
     DO UPDATE SET telegram_id = EXCLUDED.telegram_id
     RETURNING *
     `,
-    [tg]
+    [telegramId]
   );
 
   return result.rows[0];
@@ -77,7 +108,12 @@ async function tx(
     INSERT INTO transactions (user_id, amount, type, meta)
     VALUES ($1, $2, $3, $4)
     `,
-    [userId, amount, type, JSON.stringify(meta)]
+    [
+      userId,
+      amount,
+      type,
+      JSON.stringify(meta),
+    ]
   );
 }
 
@@ -211,7 +247,7 @@ app.post('/api/tasks/:id/claim', async (req: any, reply) => {
       });
     }
 
-    const alreadyCompleted = await client.query(
+    const completedResult = await client.query(
       `
       SELECT 1
       FROM task_completions
@@ -221,7 +257,7 @@ app.post('/api/tasks/:id/claim', async (req: any, reply) => {
       [u.id, task.id]
     );
 
-    if (alreadyCompleted.rows.length > 0) {
+    if (completedResult.rows.length > 0) {
       return reply.code(400).send({
         error: 'Задание уже выполнено',
       });
@@ -285,207 +321,218 @@ app.get('/api/shop', async (_, reply) => {
   }
 });
 
-// Создание игры
-app.post('/api/games/mines', async (req: any, reply) => {
-  let client: any = null;
-
+// Создание счёта Telegram Stars
+app.post('/api/shop/invoice', async (req: any, reply) => {
   try {
     const telegramId = auth(req);
-    const { bet = 50, mines = 3 } = req.body || {};
-    const numericBet = Number(bet);
-    const numericMines = Number(mines);
+    const { stars } = req.body || {};
 
-    const u = await user(telegramId);
+    const numericStars = Number(stars);
 
-    if (
-      ![50, 500, 1000, 5000].includes(numericBet) ||
-      !Number.isInteger(numericMines) ||
-      numericMines < 1 ||
-      numericMines > 12
-    ) {
+    const packageResult = await pool.query(
+      `
+      SELECT *
+      FROM shop_packages
+      WHERE stars = $1
+        AND active = true
+      LIMIT 1
+      `,
+      [numericStars]
+    );
+
+    const selectedPackage = packageResult.rows[0];
+
+    if (!selectedPackage) {
       return reply.code(400).send({
-        error: 'Неверные параметры',
+        error: 'Такого набора нет',
       });
     }
 
-    if (Number(u.balance) < numericBet) {
-      return reply.code(400).send({
-        error: 'Недостаточно листиков',
-      });
-    }
-
-    const bombs = [...Array(36).keys()]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, numericMines);
-
-    client = await pool.connect();
-
-    await client.query('BEGIN');
-
-    await tx(client, u.id, -numericBet, 'mine_bet', {
-      bet: numericBet,
-      mines: numericMines,
+    const payload = JSON.stringify({
+      telegramId,
+      stars: Number(selectedPackage.stars),
+      leaves: Number(selectedPackage.leaves),
+      createdAt: Date.now(),
     });
 
-    const gameResult = await client.query(
+    await pool.query(
       `
-      INSERT INTO games (user_id, bet, mines, state, status)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id
+      INSERT INTO payment_orders (
+        telegram_id,
+        payload,
+        stars,
+        leaves
+      )
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (payload) DO NOTHING
       `,
       [
-        u.id,
-        numericBet,
-        numericMines,
-        JSON.stringify({
-          bombs,
-          opened: [],
-          multiplier: 1,
-        }),
-        'active',
+        telegramId,
+        payload,
+        Number(selectedPackage.stars),
+        Number(selectedPackage.leaves),
       ]
     );
 
-    await client.query('COMMIT');
+    const telegramResponse = await fetch(
+      `https://api.telegram.org/bot${botToken}/createInvoiceLink`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: `${selectedPackage.leaves} листиков`,
+          description: `Покупка ${selectedPackage.leaves} кленовых листиков`,
+          payload,
+          currency: 'XTR',
+          prices: [
+            {
+              label: `${selectedPackage.leaves} листиков`,
+              amount: Number(selectedPackage.stars),
+            },
+          ],
+        }),
+      }
+    );
 
-    const updated = await user(telegramId);
+    const result: any = await telegramResponse.json();
+
+    if (!result.ok) {
+      return reply.code(500).send({
+        error: result.description || 'Не удалось создать счёт',
+      });
+    }
 
     return {
-      gameId: gameResult.rows[0].id,
-      bombs: [],
-      balance: Number(updated.balance),
+      invoiceLink: result.result,
     };
   } catch (error: any) {
-    if (client) {
-      await client.query('ROLLBACK').catch(() => {});
-    }
-
     return reply.code(error.statusCode || 500).send({
-      error: error.message || 'Ошибка игры',
+      error: error.message || 'Ошибка оплаты',
     });
-  } finally {
-    if (client) {
-      client.release();
-    }
   }
 });
 
-// Открытие клетки
-app.post('/api/games/mines/:id/open', async (req: any, reply) => {
-  let client: any = null;
-
+// Webhook Telegram для подтверждения платежей
+app.post('/telegram/webhook', async (req: any, reply) => {
   try {
-    const telegramId = auth(req);
-    const u = await user(telegramId);
+    const update = req.body || {};
 
-    client = await pool.connect();
+    // Telegram спрашивает, можно ли провести платёж
+    if (update.pre_checkout_query) {
+      const query = update.pre_checkout_query;
 
-    const gameResult = await client.query(
-      `
-      SELECT *
-      FROM games
-      WHERE id = $1
-        AND user_id = $2
-        AND status = 'active'
-      `,
-      [req.params.id, u.id]
-    );
-
-    const game = gameResult.rows[0];
-
-    if (!game) {
-      return reply.code(404).send({
-        error: 'Игра не найдена',
-      });
-    }
-
-    const cell = Number(req.body?.cell);
-    const state =
-      typeof game.state === 'string'
-        ? JSON.parse(game.state)
-        : game.state;
-
-    if (
-      !Number.isInteger(cell) ||
-      cell < 0 ||
-      cell > 35
-    ) {
-      return reply.code(400).send({
-        error: 'Неверная клетка',
-      });
-    }
-
-    if (state.opened.includes(cell)) {
-      return {
-        balance: Number(u.balance),
-        state,
-      };
-    }
-
-    if (state.bombs.includes(cell)) {
-      state.opened.push(cell);
-
-      await client.query(
-        `
-        UPDATE games
-        SET state = $1,
-            status = 'lost'
-        WHERE id = $2
-        `,
-        [JSON.stringify(state), game.id]
+      await fetch(
+        `https://api.telegram.org/bot${botToken}/answerPreCheckoutQuery`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            pre_checkout_query_id: query.id,
+            ok: true,
+          }),
+        }
       );
 
-      return {
-        lost: true,
-        balance: Number(u.balance),
-        state,
-      };
+      return { ok: true };
     }
 
-    state.opened.push(cell);
-    state.multiplier = 1 + state.opened.length * 0.15;
+    // Telegram сообщает об успешной оплате
+    const payment =
+      update.message?.successful_payment ||
+      update.successful_payment;
 
-    const reward = Math.floor(
-      Number(game.bet) * state.multiplier
-    );
+    if (payment) {
+      const payload = payment.invoice_payload;
 
-    await client.query('BEGIN');
+      const orderResult = await pool.query(
+        `
+        SELECT *
+        FROM payment_orders
+        WHERE payload = $1
+        LIMIT 1
+        `,
+        [payload]
+      );
 
-    await tx(client, u.id, reward, 'mine_win', {
-      gameId: game.id,
-      cell,
-    });
+      const order = orderResult.rows[0];
 
-    await client.query(
-      `
-      UPDATE games
-      SET state = $1
-      WHERE id = $2
-      `,
-      [JSON.stringify(state), game.id]
-    );
+      if (!order) {
+        return { ok: true };
+      }
 
-    await client.query('COMMIT');
+      // Если уже начисляли — повторно не начисляем
+      if (order.status === 'paid') {
+        return { ok: true };
+      }
 
-    const updated = await user(telegramId);
+      const client = await pool.connect();
 
-    return {
-      reward,
-      balance: Number(updated.balance),
-      state,
-    };
-  } catch (error: any) {
-    if (client) {
-      await client.query('ROLLBACK').catch(() => {});
+      try {
+        await client.query('BEGIN');
+
+        const lockedOrderResult = await client.query(
+          `
+          SELECT *
+          FROM payment_orders
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [order.id]
+        );
+
+        const lockedOrder = lockedOrderResult.rows[0];
+
+        if (lockedOrder.status === 'paid') {
+          await client.query('COMMIT');
+          return { ok: true };
+        }
+
+        const u = await user(lockedOrder.telegram_id);
+
+        await tx(
+          client,
+          u.id,
+          Number(lockedOrder.leaves),
+          'stars_purchase',
+          {
+            stars: Number(lockedOrder.stars),
+            leaves: Number(lockedOrder.leaves),
+            paymentId: payment.telegram_payment_charge_id,
+          }
+        );
+
+        await client.query(
+          `
+          UPDATE payment_orders
+          SET
+            status = 'paid',
+            telegram_payment_charge_id = $1,
+            paid_at = NOW()
+          WHERE id = $2
+          `,
+          [
+            payment.telegram_payment_charge_id,
+            lockedOrder.id,
+          ]
+        );
+
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
     }
 
-    return reply.code(error.statusCode || 500).send({
-      error: error.message || 'Ошибка игры',
-    });
-  } finally {
-    if (client) {
-      client.release();
-    }
+    return { ok: true };
+  } catch (error) {
+    app.log.error(error);
+    return { ok: false };
   }
 });
 
@@ -537,7 +584,12 @@ app.post('/api/admin/tasks', async (req: any, reply) => {
     VALUES ($1, $2, $3, $4, true)
     RETURNING *
     `,
-    [title, description, channelUrl, Number(reward)]
+    [
+      title,
+      description,
+      channelUrl,
+      Number(reward),
+    ]
   );
 
   return result.rows[0];
@@ -550,8 +602,21 @@ app.get('/health', async () => {
   };
 });
 
-// Запуск сервера
-app.listen({
-  port: Number(process.env.PORT || 3000),
-  host: '0.0.0.0',
-});
+// Запуск
+async function start() {
+  try {
+    await prepareDatabase();
+
+    await app.listen({
+      port: Number(process.env.PORT || 3000),
+      host: '0.0.0.0',
+    });
+
+    app.log.info('Maple Mini App запущен');
+  } catch (error) {
+    app.log.error(error);
+    process.exit(1);
+  }
+}
+
+start();
