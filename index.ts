@@ -18,10 +18,11 @@ app.register(fastifyStatic, {
   root: path.join(process.cwd(), 'public'),
 });
 
-app.get('/', async (_, r) => r.sendFile('index.html'));
+app.get('/', async (_, reply) => {
+  return reply.sendFile('index.html');
+});
 
-// Получаем настоящий Telegram ID.
-// Общего demo-user больше нет.
+// Получаем Telegram ID пользователя
 function auth(req: any): string {
   const tgId = req.headers['x-telegram-id'];
 
@@ -37,363 +38,476 @@ function auth(req: any): string {
   return String(tgId);
 }
 
+// Получаем или создаём пользователя.
+// ON CONFLICT предотвращает ошибку duplicate key.
 async function user(tg: string) {
-  let q = await pool.query(
-    'SELECT * FROM users WHERE telegram_id=$1',
+  const result = await pool.query(
+    `
+    INSERT INTO users (telegram_id, balance)
+    VALUES ($1, 0)
+    ON CONFLICT (telegram_id)
+    DO UPDATE SET telegram_id = EXCLUDED.telegram_id
+    RETURNING *
+    `,
     [tg]
   );
 
-  if (!q.rows[0]) {
-    q = await pool.query(
-      `INSERT INTO users(telegram_id, balance)
-       VALUES($1, 0)
-       RETURNING *`,
-      [tg]
-    );
-  }
-
-  return q.rows[0];
+  return result.rows[0];
 }
 
+// Изменение баланса и запись операции
 async function tx(
   client: any,
-  id: number,
+  userId: number,
   amount: number,
   type: string,
-  meta = {}
+  meta: Record<string, any> = {}
 ) {
   await client.query(
-    'UPDATE users SET balance=balance+$1 WHERE id=$2',
-    [amount, id]
+    `
+    UPDATE users
+    SET balance = balance + $1
+    WHERE id = $2
+    `,
+    [amount, userId]
   );
 
   await client.query(
-    `INSERT INTO transactions(user_id, amount, type, meta)
-     VALUES($1, $2, $3, $4)`,
-    [id, amount, type, meta]
+    `
+    INSERT INTO transactions (user_id, amount, type, meta)
+    VALUES ($1, $2, $3, $4)
+    `,
+    [userId, amount, type, JSON.stringify(meta)]
   );
 }
 
-app.get('/api/me', async (req: any, rep) => {
+// Данные пользователя
+app.get('/api/me', async (req: any, reply) => {
   try {
-    const u = await user(auth(req));
+    const telegramId = auth(req);
+    const u = await user(telegramId);
 
     return {
       id: u.telegram_id,
-      balance: u.balance,
+      balance: Number(u.balance),
       firstName: u.first_name || 'Игрок',
     };
-  } catch (e: any) {
-    return rep.code(e.statusCode || 500).send({
-      error: e.message || 'Ошибка',
+  } catch (error: any) {
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
     });
   }
 });
 
-app.post('/api/daily', async (req: any, rep) => {
-  const c = await pool.connect();
+// Ежедневный бонус
+app.post('/api/daily', async (req: any, reply) => {
+  let client: any = null;
 
   try {
-    const u = await user(auth(req));
+    const telegramId = auth(req);
+    const u = await user(telegramId);
 
-    const ok =
+    const canReceive =
       !u.last_daily_at ||
       Date.now() - new Date(u.last_daily_at).getTime() > 86400000;
 
-    if (!ok) {
-      return rep.code(400).send({
+    if (!canReceive) {
+      return reply.code(400).send({
         error: 'Бонус уже получен',
       });
     }
 
-    await c.query('BEGIN');
+    client = await pool.connect();
 
-    await c.query(
-      'UPDATE users SET last_daily_at=NOW() WHERE id=$1',
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+      UPDATE users
+      SET last_daily_at = NOW()
+      WHERE id = $1
+      `,
       [u.id]
     );
 
-    await tx(c, u.id, 2500, 'daily');
+    await tx(client, u.id, 2500, 'daily');
 
-    await c.query('COMMIT');
+    await client.query('COMMIT');
 
-    const updated = await user(auth(req));
+    const updated = await user(telegramId);
 
     return {
-      balance: updated.balance,
+      balance: Number(updated.balance),
       reward: 2500,
     };
-  } catch (e: any) {
-    await c.query('ROLLBACK');
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
 
-    return rep.code(e.statusCode || 500).send({
-      error: e.message || 'Ошибка',
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
     });
   } finally {
-    c.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 
-app.get('/api/tasks', async (req: any, rep) => {
+// Список заданий
+app.get('/api/tasks', async (req: any, reply) => {
   try {
     const u = await user(auth(req));
 
-    const q = await pool.query(
-      `SELECT
-         t.*,
-         c.created_at AS completed_at
-       FROM tasks t
-       LEFT JOIN task_completions c
-         ON c.task_id=t.id AND c.user_id=$1
-       WHERE t.active=true
-       ORDER BY t.id`,
+    const result = await pool.query(
+      `
+      SELECT
+        t.*,
+        c.created_at AS completed_at
+      FROM tasks t
+      LEFT JOIN task_completions c
+        ON c.task_id = t.id
+       AND c.user_id = $1
+      WHERE t.active = true
+      ORDER BY t.id
+      `,
       [u.id]
     );
 
-    return q.rows;
-  } catch (e: any) {
-    return rep.code(e.statusCode || 500).send({
-      error: e.message || 'Ошибка',
+    return result.rows;
+  } catch (error: any) {
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
     });
   }
 });
 
-app.post('/api/tasks/:id/claim', async (req: any, rep) => {
-  const c = await pool.connect();
+// Получение награды за задание
+app.post('/api/tasks/:id/claim', async (req: any, reply) => {
+  let client: any = null;
 
   try {
-    const u = await user(auth(req));
+    const telegramId = auth(req);
+    const u = await user(telegramId);
 
-    const t = (
-      await c.query(
-        'SELECT * FROM tasks WHERE id=$1 AND active=true',
-        [req.params.id]
-      )
-    ).rows[0];
+    client = await pool.connect();
 
-    if (!t) {
-      return rep.code(404).send({
+    const taskResult = await client.query(
+      `
+      SELECT *
+      FROM tasks
+      WHERE id = $1
+        AND active = true
+      `,
+      [req.params.id]
+    );
+
+    const task = taskResult.rows[0];
+
+    if (!task) {
+      return reply.code(404).send({
         error: 'Задание не найдено',
       });
     }
 
-    await c.query('BEGIN');
-
-    await c.query(
-      `INSERT INTO task_completions(user_id, task_id)
-       VALUES($1, $2)`,
-      [u.id, t.id]
+    const alreadyCompleted = await client.query(
+      `
+      SELECT 1
+      FROM task_completions
+      WHERE user_id = $1
+        AND task_id = $2
+      `,
+      [u.id, task.id]
     );
 
-    await tx(c, u.id, t.reward, 'task', {
-      taskId: t.id,
+    if (alreadyCompleted.rows.length > 0) {
+      return reply.code(400).send({
+        error: 'Задание уже выполнено',
+      });
+    }
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+      INSERT INTO task_completions (user_id, task_id)
+      VALUES ($1, $2)
+      `,
+      [u.id, task.id]
+    );
+
+    await tx(client, u.id, Number(task.reward), 'task', {
+      taskId: task.id,
     });
 
-    await c.query('COMMIT');
+    await client.query('COMMIT');
 
-    const updated = await user(auth(req));
+    const updated = await user(telegramId);
 
     return {
-      balance: updated.balance,
+      balance: Number(updated.balance),
     };
-  } catch (e: any) {
-    await c.query('ROLLBACK');
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
 
-    return rep.code(400).send({
-      error: 'Задание уже выполнено',
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
     });
   } finally {
-    c.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 
-app.get('/api/shop', async () => ({
-  packages: (
-    await pool.query(
-      `SELECT *
-       FROM shop_packages
-       WHERE active=true
-       ORDER BY stars`
-    )
-  ).rows,
-}));
-
-app.post('/api/games/mines', async (req: any, rep) => {
+// Магазин
+app.get('/api/shop', async (_, reply) => {
   try {
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM shop_packages
+      WHERE active = true
+      ORDER BY stars
+      `
+    );
+
+    return {
+      packages: result.rows,
+    };
+  } catch (error: any) {
+    return reply.code(500).send({
+      error: error.message || 'Ошибка магазина',
+    });
+  }
+});
+
+// Создание игры
+app.post('/api/games/mines', async (req: any, reply) => {
+  let client: any = null;
+
+  try {
+    const telegramId = auth(req);
     const { bet = 50, mines = 3 } = req.body || {};
-    const u = await user(auth(req));
+    const numericBet = Number(bet);
+    const numericMines = Number(mines);
+
+    const u = await user(telegramId);
 
     if (
-      ![50, 500, 1000, 5000].includes(Number(bet)) ||
-      !Number.isInteger(mines) ||
-      mines < 1 ||
-      mines > 12
+      ![50, 500, 1000, 5000].includes(numericBet) ||
+      !Number.isInteger(numericMines) ||
+      numericMines < 1 ||
+      numericMines > 12
     ) {
-      return rep.code(400).send({
+      return reply.code(400).send({
         error: 'Неверные параметры',
       });
     }
 
-    if (Number(u.balance) < Number(bet)) {
-      return rep.code(400).send({
+    if (Number(u.balance) < numericBet) {
+      return reply.code(400).send({
         error: 'Недостаточно листиков',
       });
     }
 
     const bombs = [...Array(36).keys()]
       .sort(() => Math.random() - 0.5)
-      .slice(0, mines);
+      .slice(0, numericMines);
 
-    const c = await pool.connect();
+    client = await pool.connect();
 
-    try {
-      await c.query('BEGIN');
+    await client.query('BEGIN');
 
-      await tx(c, u.id, -Number(bet), 'mine_bet', {
-        bet: Number(bet),
-        mines,
-      });
-
-      const game = (
-        await c.query(
-          `INSERT INTO games(user_id, bet, mines, state, status)
-           VALUES($1, $2, $3, $4, $5)
-           RETURNING id`,
-          [
-            u.id,
-            Number(bet),
-            mines,
-            {
-              bombs,
-              opened: [],
-              multiplier: 1,
-            },
-            'active',
-          ]
-        )
-      ).rows[0];
-
-      await c.query('COMMIT');
-
-      const updated = await user(auth(req));
-
-      return {
-        gameId: game.id,
-        bombs: [],
-        balance: updated.balance,
-      };
-    } catch (e) {
-      await c.query('ROLLBACK');
-      throw e;
-    } finally {
-      c.release();
-    }
-  } catch (e: any) {
-    return rep.code(e.statusCode || 500).send({
-      error: e.message || 'Ошибка',
+    await tx(client, u.id, -numericBet, 'mine_bet', {
+      bet: numericBet,
+      mines: numericMines,
     });
+
+    const gameResult = await client.query(
+      `
+      INSERT INTO games (user_id, bet, mines, state, status)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
+      `,
+      [
+        u.id,
+        numericBet,
+        numericMines,
+        JSON.stringify({
+          bombs,
+          opened: [],
+          multiplier: 1,
+        }),
+        'active',
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    const updated = await user(telegramId);
+
+    return {
+      gameId: gameResult.rows[0].id,
+      bombs: [],
+      balance: Number(updated.balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка игры',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 });
 
-app.post('/api/games/mines/:id/open', async (req: any, rep) => {
-  const c = await pool.connect();
+// Открытие клетки
+app.post('/api/games/mines/:id/open', async (req: any, reply) => {
+  let client: any = null;
 
   try {
-    const u = await user(auth(req));
+    const telegramId = auth(req);
+    const u = await user(telegramId);
 
-    const g = (
-      await c.query(
-        `SELECT *
-         FROM games
-         WHERE id=$1 AND user_id=$2 AND status=$3`,
-        [req.params.id, u.id, 'active']
-      )
-    ).rows[0];
+    client = await pool.connect();
 
-    if (!g) {
-      return rep.code(404).send({
+    const gameResult = await client.query(
+      `
+      SELECT *
+      FROM games
+      WHERE id = $1
+        AND user_id = $2
+        AND status = 'active'
+      `,
+      [req.params.id, u.id]
+    );
+
+    const game = gameResult.rows[0];
+
+    if (!game) {
+      return reply.code(404).send({
         error: 'Игра не найдена',
       });
     }
 
     const cell = Number(req.body?.cell);
-    const s = g.state;
+    const state =
+      typeof game.state === 'string'
+        ? JSON.parse(game.state)
+        : game.state;
 
-    if (s.opened.includes(cell)) {
+    if (
+      !Number.isInteger(cell) ||
+      cell < 0 ||
+      cell > 35
+    ) {
+      return reply.code(400).send({
+        error: 'Неверная клетка',
+      });
+    }
+
+    if (state.opened.includes(cell)) {
       return {
-        balance: u.balance,
-        state: s,
+        balance: Number(u.balance),
+        state,
       };
     }
 
-    if (s.bombs.includes(cell)) {
-      await c.query(
-        'UPDATE games SET status=$1 WHERE id=$2',
-        ['lost', g.id]
+    if (state.bombs.includes(cell)) {
+      state.opened.push(cell);
+
+      await client.query(
+        `
+        UPDATE games
+        SET state = $1,
+            status = 'lost'
+        WHERE id = $2
+        `,
+        [JSON.stringify(state), game.id]
       );
 
       return {
         lost: true,
-        balance: u.balance,
-        state: {
-          ...s,
-          opened: [...s.opened, cell],
-        },
+        balance: Number(u.balance),
+        state,
       };
     }
 
-    s.opened.push(cell);
-    s.multiplier = 1 + s.opened.length * 0.15;
+    state.opened.push(cell);
+    state.multiplier = 1 + state.opened.length * 0.15;
 
-    const reward = Math.floor(g.bet * s.multiplier);
+    const reward = Math.floor(
+      Number(game.bet) * state.multiplier
+    );
 
-    await c.query('BEGIN');
+    await client.query('BEGIN');
 
-    await tx(c, u.id, reward, 'mine_win', {
-      gameId: g.id,
+    await tx(client, u.id, reward, 'mine_win', {
+      gameId: game.id,
       cell,
     });
 
-    await c.query(
-      'UPDATE games SET state=$1 WHERE id=$2',
-      [s, g.id]
+    await client.query(
+      `
+      UPDATE games
+      SET state = $1
+      WHERE id = $2
+      `,
+      [JSON.stringify(state), game.id]
     );
 
-    await c.query('COMMIT');
+    await client.query('COMMIT');
 
-    const updated = await user(auth(req));
+    const updated = await user(telegramId);
 
     return {
       reward,
-      balance: updated.balance,
-      state: s,
+      balance: Number(updated.balance),
+      state,
     };
-  } catch (e: any) {
-    await c.query('ROLLBACK');
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
 
-    return rep.code(e.statusCode || 500).send({
-      error: e.message || 'Ошибка',
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка игры',
     });
   } finally {
-    c.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 
-app.get('/api/admin/tasks', async (req: any, rep) => {
+// Админ: список заданий
+app.get('/api/admin/tasks', async (req: any, reply) => {
   if (req.headers['x-admin-key'] !== adminKey) {
-    return rep.code(401).send({
+    return reply.code(401).send({
       error: 'Нет доступа',
     });
   }
 
-  return (
-    await pool.query('SELECT * FROM tasks ORDER BY id DESC')
-  ).rows;
+  const result = await pool.query(
+    'SELECT * FROM tasks ORDER BY id DESC'
+  );
+
+  return result.rows;
 });
 
-app.post('/api/admin/tasks', async (req: any, rep) => {
+// Админ: создание задания
+app.post('/api/admin/tasks', async (req: any, reply) => {
   if (req.headers['x-admin-key'] !== adminKey) {
-    return rep.code(401).send({
+    return reply.code(401).send({
       error: 'Нет доступа',
     });
   }
@@ -405,20 +519,38 @@ app.post('/api/admin/tasks', async (req: any, rep) => {
     reward = 10000,
   } = req.body || {};
 
-  return (
-    await pool.query(
-      `INSERT INTO tasks(title, description, channel_url, reward)
-       VALUES($1, $2, $3, $4)
-       RETURNING *`,
-      [title, description, channelUrl, reward]
+  if (!title) {
+    return reply.code(400).send({
+      error: 'Название задания обязательно',
+    });
+  }
+
+  const result = await pool.query(
+    `
+    INSERT INTO tasks (
+      title,
+      description,
+      channel_url,
+      reward,
+      active
     )
-  ).rows[0];
+    VALUES ($1, $2, $3, $4, true)
+    RETURNING *
+    `,
+    [title, description, channelUrl, Number(reward)]
+  );
+
+  return result.rows[0];
 });
 
-app.get('/health', async () => ({
-  ok: true,
-}));
+// Проверка сервера
+app.get('/health', async () => {
+  return {
+    ok: true,
+  };
+});
 
+// Запуск сервера
 app.listen({
   port: Number(process.env.PORT || 3000),
   host: '0.0.0.0',
