@@ -42,7 +42,25 @@ button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#
 <div id="gameArea" class="hidden"><div class="muted center" style="margin-top:18px">Нажимай на клетки. Не попадись на бомбу!</div><div id="mineGrid" class="mines"></div><button class="primary" style="margin-top:16px" onclick="cashOut()">ЗАБРАТЬ ВЫИГРЫШ</button></div>
 </div></section>
 
-<section id="shopPage" class="hidden"><div class="title">🛒 Магазин</div><div class="card"><div class="center" style="margin-bottom:15px"><div class="muted">Покупка листиков</div><b style="font-size:24px;display:block;margin-top:5px">⭐ Telegram Stars</b></div><div id="shopList"><div class="loading">Загрузка магазина...</div></div></div></section>
+<section id="shopPage" class="hidden">
+<div class="title">🛒 Магазин</div>
+
+<div class="card">
+  <div class="center" style="margin-bottom:15px">
+    <div class="muted">Покупка листиков</div>
+    <b style="font-size:24px;display:block;margin-top:5px">⭐ Telegram Stars</b>
+  </div>
+  <div id="shopList"><div class="loading">Загрузка магазина...</div></div>
+</div>
+
+<div class="title">🎁 NFT-подарки</div>
+<div class="card">
+  <div class="muted" style="margin-bottom:12px">
+    Покупай подарки за кленовые листики. Цена каждого подарка — 2 500 000 листиков.
+  </div>
+  <div id="nftList"></div>
+</div>
+</section>
 <section id="historyPage" class="hidden"><div class="title">📜 История</div><div class="card"><div class="muted center">История операций появится здесь.</div></div></section>
 </div>
 
@@ -61,7 +79,54 @@ async function getDaily(){const b=document.getElementById('dailyBtn');b.disabled
 function taskHtml(a){return a.length?a.map(t=>`<div class="task"><div class="info"><b>${esc(t.title)}</b><div class="reward">🍁 +${t.reward}</div></div><button class="green" onclick="claimTask(${t.id},this)">Получить</button></div>`).join(''):'<div class="muted center">Заданий пока нет</div>'}
 async function loadTasks(){try{const a=await api('/api/tasks');document.getElementById('homeTasks').innerHTML=taskHtml(a);document.getElementById('tasksList').innerHTML=taskHtml(a)}catch{document.getElementById('homeTasks').innerHTML='<div class="muted">Не удалось загрузить задания</div>'}}
 async function claimTask(id,b){b.disabled=true;try{const d=await api('/api/tasks/'+id+'/claim',{method:'POST'});updateBalance(d.balance);msg('🍁 Награда получена!');loadTasks()}catch(e){msg(e.message);b.disabled=false}}
-async function loadShop(){try{const d=await api('/api/shop');const a=d.packages||[];document.getElementById('shopList').innerHTML=a.length?a.map(p=>`<div class="shop"><div class="info"><b>🍁 ${Number(p.leaves).toLocaleString('ru-RU')} листиков</b><div class="price">⭐ ${p.stars} Stars</div></div><button class="blue" onclick="buyPackage(${p.stars})">Купить</button></div>`).join(''):'<div class="muted center">Пакеты пока не настроены</div>'}catch(e){msg(e.message)}}
+async function loadShop(){
+  try{
+    const d=await api('/api/shop');
+    const a=d.packages||[];
+    document.getElementById('shopList').innerHTML=a.length
+      ? a.map(p=>`<div class="shop"><div class="info"><b>🍁 ${Number(p.leaves).toLocaleString('ru-RU')} листиков</b><div class="price">⭐ ${p.stars} Stars</div></div><button class="blue" onclick="buyPackage(${p.stars})">Купить</button></div>`).join('')
+      : '<div class="muted center">Пакеты пока не настроены</div>';
+
+    loadNfts();
+  }catch(e){msg(e.message)}
+}
+
+const nftProducts=[
+  {id:'vice-143868',name:'Vice Cream #143868',url:'https://t.me/nft/ViceCream-143868'},
+  {id:'pool-67988',name:'Pool Float #67988',url:'https://t.me/nft/PoolFloat-67988'},
+  {id:'vice-314974',name:'Vice Cream #314974',url:'https://t.me/nft/ViceCream-314974'}
+];
+
+function loadNfts(){
+  document.getElementById('nftList').innerHTML=nftProducts.map(n=>`
+    <div class="shop">
+      <div class="info">
+        <b>🎁 ${n.name}</b>
+        <div class="price">🍁 2 500 000 листиков</div>
+        <button style="margin-top:9px;padding:9px 11px" onclick="viewNft('${n.url}')">Посмотреть подарок</button>
+      </div>
+      <button class="blue" onclick="buyNft('${n.id}')">Купить</button>
+    </div>
+  `).join('');
+}
+
+function viewNft(url){
+  if(tg?.openTelegramLink) tg.openTelegramLink(url);
+  else window.open(url,'_blank');
+}
+
+async function buyNft(id){
+  try{
+    const d=await api('/api/shop/nft',{
+      method:'POST',
+      body:JSON.stringify({id})
+    });
+    updateBalance(d.balance);
+    msg('🎁 Подарок куплен!');
+  }catch(e){
+    msg(e.message);
+  }
+}
 async function buyPackage(stars){try{const d=await api('/api/shop/invoice',{method:'POST',body:JSON.stringify({stars})});if(!d.invoiceLink)throw Error('Ссылка на оплату не получена');if(tg?.openInvoice){tg.openInvoice(d.invoiceLink,s=>{if(s==='paid'){msg('⭐ Оплата прошла!');setTimeout(loadUser,1500)}else if(s==='cancelled')msg('Оплата отменена');else if(s==='failed')msg('Оплата не прошла')})}else window.open(d.invoiceLink,'_blank')}catch(e){msg(e.message)}}
 function setBet(v){bet=v;document.querySelectorAll('.grid:not(.bombs) button').forEach(b=>b.classList.remove('selected'));document.getElementById('bet'+v).classList.add('selected')}
 function setMines(v){mines=v;document.querySelectorAll('.bombs button').forEach(b=>b.classList.remove('selected'));document.getElementById('bomb'+v).classList.add('selected')}
