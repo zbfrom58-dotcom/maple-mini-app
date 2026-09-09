@@ -496,12 +496,13 @@
       updateBalance(data.balance);
       showMessage('🎉 Получено 2500 листиков!');
       btn.textContent = 'Бонус получен';
-    } catch (e) {
+        } catch (e) {
       showMessage(e.message);
       btn.disabled = false;
     }
+  }
 
-    async function loadTasks() {
+  async function loadTasks() {
       try {
         const tasks = await api('/api/tasks');
 
