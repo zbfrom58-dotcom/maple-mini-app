@@ -13,7 +13,7 @@
 .big{font-size:42px;font-weight:900;color:#ffb21c;margin:8px 0}.muted{color:#999;font-size:14px}
 .title{font-size:21px;font-weight:bold;margin:22px 0 12px}button{border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:bold;cursor:pointer;color:#fff;background:#333}
 button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#ff7b00);color:#111;width:100%}.blue{background:#315cff}.green{background:#198754}
-.hidden{display:none!important}.message{text-align:center;color:#ffb21c;min-height:20px;margin:10px 0}.loading{text-align:center;color:#999;padding:25px}
+.hidden{display:none!important}.shop-tabs{display:flex;gap:8px;margin-bottom:12px}.shop-tab{flex:1;background:#292929;color:#aaa}.shop-tab.active{background:#ff9d00;color:#111}.shop-panel.hidden{display:none!important}.message{text-align:center;color:#ffb21c;min-height:20px;margin:10px 0}.loading{text-align:center;color:#999;padding:25px}
 .task,.shop{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid #333}.task:last-child,.shop:last-child{border-bottom:0}
 .info{flex:1}.reward,.price{font-size:13px;margin-top:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.bombs{grid-template-columns:repeat(6,1fr)}
 .selected{background:#315cff!important}.mines{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:15px}.cell{aspect-ratio:1;padding:0;border-radius:10px;background:#171717;border:1px solid #333;font-size:20px}.cell.open{border-color:#ffb21c}.cell.bomb{background:#7b2020}
@@ -44,7 +44,12 @@ button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#
 
 <section id="shopPage" class="hidden">
 <div class="title">🛒 Магазин</div>
+<div class="shop-tabs">
+  <button class="shop-tab active" onclick="showShopTab('starsTab',this)">⭐ Листики</button>
+  <button class="shop-tab" onclick="showShopTab('nftTab',this)">🎁 NFT</button>
+</div>
 
+<div id="starsTab" class="shop-panel">
 <div class="card">
   <div class="center" style="margin-bottom:15px">
     <div class="muted">Покупка листиков</div>
@@ -52,13 +57,16 @@ button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#
   </div>
   <div id="shopList"><div class="loading">Загрузка магазина...</div></div>
 </div>
+</div>
 
-<div class="title">🎁 NFT-подарки</div>
+<div id="nftTab" class="shop-panel hidden">
 <div class="card">
+  <div class="title" style="margin-top:0">🎁 NFT-подарки</div>
   <div class="muted" style="margin-bottom:12px">
     Покупай подарки за кленовые листики. Цена каждого подарка — 2 500 000 листиков.
   </div>
   <div id="nftList"></div>
+</div>
 </div>
 </section>
 <section id="historyPage" class="hidden"><div class="title">📜 История</div><div class="card"><div class="muted center">История операций появится здесь.</div></div></section>
@@ -79,7 +87,13 @@ async function getDaily(){const b=document.getElementById('dailyBtn');b.disabled
 function taskHtml(a){return a.length?a.map(t=>`<div class="task"><div class="info"><b>${esc(t.title)}</b><div class="reward">🍁 +${t.reward}</div></div><button class="green" onclick="claimTask(${t.id},this)">Получить</button></div>`).join(''):'<div class="muted center">Заданий пока нет</div>'}
 async function loadTasks(){try{const a=await api('/api/tasks');document.getElementById('homeTasks').innerHTML=taskHtml(a);document.getElementById('tasksList').innerHTML=taskHtml(a)}catch{document.getElementById('homeTasks').innerHTML='<div class="muted">Не удалось загрузить задания</div>'}}
 async function claimTask(id,b){b.disabled=true;try{const d=await api('/api/tasks/'+id+'/claim',{method:'POST'});updateBalance(d.balance);msg('🍁 Награда получена!');loadTasks()}catch(e){msg(e.message);b.disabled=false}}
-async function loadShop(){
+async function showShopTab(id,btn){
+  document.querySelectorAll('.shop-panel').forEach(x=>x.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  document.querySelectorAll('.shop-tab').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+}
+function loadShop(){
   try{
     const d=await api('/api/shop');
     const a=d.packages||[];
