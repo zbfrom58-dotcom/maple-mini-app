@@ -90,7 +90,7 @@ async function claimTask(id,b){b.disabled=true;try{const d=await api('/api/tasks
 async function loadShop(){
   try{
     const d=await api('/api/shop');
-    const a=d.packages||[];
+    const a=Array.from(new Map((d.packages||[]).map(p=>[Number(p.stars),p])).values()).sort((x,y)=>Number(x.stars)-Number(y.stars));
     document.getElementById('shopList').innerHTML=a.length
       ? a.map(p=>`<div class="shop"><div class="info"><b>🍁 ${Number(p.leaves).toLocaleString('ru-RU')} листиков</b><div class="price">⭐ ${p.stars} Stars</div></div><button class="blue" onclick="buyPackage(${p.stars})">Купить</button></div>`).join('')
       : '<div class="muted center">Пакеты пока не настроены</div>';
@@ -99,7 +99,7 @@ async function loadShop(){
   }catch(e){msg(e.message)}
 }
 
-const nftProducts=[
+let nftProducts=[
   {id:'vice-143868',name:'Vice Cream #143868',url:'https://t.me/nft/ViceCream-143868'},
   {id:'pool-67988',name:'Pool Float #67988',url:'https://t.me/nft/PoolFloat-67988'},
   {id:'vice-314974',name:'Vice Cream #314974',url:'https://t.me/nft/ViceCream-314974'}
