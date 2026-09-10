@@ -216,31 +216,6 @@ async function prepareDatabase() {
       (3000000, 1000, true)
     ON CONFLICT DO NOTHING
   `);
-
-  // Задание "Подписка на канал" создаётся один раз при первом запуске.
-  // Ссылку на канал и награду можно задать переменными окружения в Railway:
-  // NEWS_CHANNEL_URL и NEWS_CHANNEL_REWARD (по умолчанию 10000).
-  const newsChannelUrl = process.env.NEWS_CHANNEL_URL || 'https://t.me/your_channel';
-  const newsChannelReward = Number(process.env.NEWS_CHANNEL_REWARD || 10000);
-
-  const existingNewsTask = await pool.query(
-    `SELECT 1 FROM tasks WHERE channel_url = $1`,
-    [newsChannelUrl]
-  );
-  if (existingNewsTask.rows.length === 0) {
-    await pool.query(
-      `
-      INSERT INTO tasks (title, description, channel_url, reward, active)
-      VALUES ($1, $2, $3, $4, true)
-      `,
-      [
-        'Подписка на новостной канал',
-        'Подпишись на наш канал и получи листики',
-        newsChannelUrl,
-        newsChannelReward,
-      ]
-    );
-  }
 }
 
 // Получаем настоящий Telegram ID
