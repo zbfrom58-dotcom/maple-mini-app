@@ -53,7 +53,7 @@ function generateCrashPoint(): number {
 // Текущий множитель краша в момент времени t (та же кривая, что и на клиенте)
 function crashCurrentMultiplier(startedAt: Date, crashAt: number): number {
   const t = (Date.now() - startedAt.getTime()) / 1000;
-  const m = 1 + Math.pow(t, 1.7) * 2.2;
+  const m = 1 + Math.pow(t, 1.5) * 0.15;
   return Math.min(m, crashAt);
 }
 
