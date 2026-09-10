@@ -27,6 +27,10 @@ app.get('/', async (_, reply) => {
   return reply.sendFile('index.html');
 });
 
+app.get('/admin', async (_, reply) => {
+  return reply.sendFile('admin.html');
+});
+
 // ===== Игровые константы и утилиты =====
 
 const MINES_TOTAL_CELLS = 25;
@@ -63,6 +67,67 @@ const NFT_CATALOG: Record<string, number> = {
   'pool-67988': 2500000,
   'vice-314974': 2500000,
 };
+
+// Уровни реферальной программы
+const REFERRAL_TIERS = [
+  { required: 1, reward: 50000 },
+  { required: 5, reward: 350000 },
+  { required: 10, reward: 750000 },
+  { required: 20, reward: 1000000 },
+];
+
+// Короткое имя мини-приложения, заданное в @BotFather (Bot Settings -> Mini App)
+const MINI_APP_SHORT_NAME = process.env.MINI_APP_SHORT_NAME || 'app';
+
+let cachedBotUsername: string | null = null;
+
+// Получаем username бота (для построения реферальной ссылки)
+async function getBotUsername(): Promise<string> {
+  if (cachedBotUsername) return cachedBotUsername;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+    const result: any = await response.json();
+    if (result.ok) {
+      cachedBotUsername = result.result.username;
+      return cachedBotUsername as string;
+    }
+  } catch (error) {
+    app.log.error(error);
+  }
+  return 'your_bot';
+}
+
+// Строим реферальную ссылку по коду (используем telegram_id как код)
+async function buildReferralLink(code: string): Promise<string> {
+  const username = await getBotUsername();
+  return `https://t.me/${username}/${MINI_APP_SHORT_NAME}?startapp=${code}`;
+}
+
+// Достаём @username канала из ссылки вида https://t.me/channelname
+function extractChannelUsername(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(/t\.me\/([A-Za-z0-9_]+)/);
+  if (!match) return null;
+  return '@' + match[1];
+}
+
+// Проверка подписки пользователя на канал через Telegram Bot API
+async function isSubscribed(channelUsername: string, telegramId: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(
+        channelUsername
+      )}&user_id=${telegramId}`
+    );
+    const result: any = await response.json();
+    if (!result.ok) return false;
+    const status = result.result.status;
+    return ['member', 'administrator', 'creator'].includes(status);
+  } catch (error) {
+    app.log.error(error);
+    return false;
+  }
+}
 
 // Создаём таблицы при запуске
 async function prepareDatabase() {
@@ -116,6 +181,27 @@ async function prepareDatabase() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS referrals (
+      id BIGSERIAL PRIMARY KEY,
+      referrer_id INTEGER NOT NULL REFERENCES users(id),
+      referred_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+      confirmed BOOLEAN NOT NULL DEFAULT false,
+      confirmed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referral_tier_claims (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      tier INTEGER NOT NULL,
+      claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, tier)
+    )
+  `);
+
+  await pool.query(`
     INSERT INTO shop_packages (leaves, stars, active)
     VALUES
       (100000, 50, true),
@@ -124,6 +210,31 @@ async function prepareDatabase() {
       (3000000, 1000, true)
     ON CONFLICT DO NOTHING
   `);
+
+  // Задание "Подписка на канал" создаётся один раз при первом запуске.
+  // Ссылку на канал и награду можно задать переменными окружения в Railway:
+  // NEWS_CHANNEL_URL и NEWS_CHANNEL_REWARD (по умолчанию 10000).
+  const newsChannelUrl = process.env.NEWS_CHANNEL_URL || 'https://t.me/your_channel';
+  const newsChannelReward = Number(process.env.NEWS_CHANNEL_REWARD || 10000);
+
+  const existingNewsTask = await pool.query(
+    `SELECT 1 FROM tasks WHERE channel_url = $1`,
+    [newsChannelUrl]
+  );
+  if (existingNewsTask.rows.length === 0) {
+    await pool.query(
+      `
+      INSERT INTO tasks (title, description, channel_url, reward, active)
+      VALUES ($1, $2, $3, $4, true)
+      `,
+      [
+        'Подписка на новостной канал',
+        'Подпишись на наш канал и получи листики',
+        newsChannelUrl,
+        newsChannelReward,
+      ]
+    );
+  }
 }
 
 // Получаем настоящий Telegram ID
@@ -190,6 +301,31 @@ app.get('/api/me', async (req: any, reply) => {
   try {
     const telegramId = auth(req);
     const u = await user(telegramId);
+
+    const refCode = req.headers['x-ref-code'];
+    if (refCode && String(refCode) !== telegramId) {
+      const existingRef = await pool.query(
+        `SELECT 1 FROM referrals WHERE referred_id = $1`,
+        [u.id]
+      );
+      if (existingRef.rows.length === 0) {
+        const referrer = await pool.query(
+          `SELECT id FROM users WHERE telegram_id = $1`,
+          [String(refCode)]
+        );
+        if (referrer.rows[0]) {
+          await pool.query(
+            `
+            INSERT INTO referrals (referrer_id, referred_id)
+            VALUES ($1, $2)
+            ON CONFLICT DO NOTHING
+            `,
+            [referrer.rows[0].id, u.id]
+          );
+        }
+      }
+    }
+
     return {
       id: u.telegram_id,
       balance: Number(u.balance),
@@ -232,6 +368,15 @@ app.post('/api/daily', async (req: any, reply) => {
 
     await tx(client, u.id, 2500, 'daily');
 
+    await client.query(
+      `
+      UPDATE referrals
+      SET confirmed = true, confirmed_at = NOW()
+      WHERE referred_id = $1 AND confirmed = false
+      `,
+      [u.id]
+    );
+
     await client.query('COMMIT');
 
     const updated = await user(telegramId);
@@ -254,6 +399,129 @@ app.post('/api/daily', async (req: any, reply) => {
 });
 
 // Список заданий
+// Информация о рефералах пользователя
+app.get('/api/referral/info', async (req: any, reply) => {
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)
+      FROM referrals
+      WHERE referrer_id = $1
+      AND confirmed = true
+      `,
+      [u.id]
+    );
+    const confirmedCount = Number(countResult.rows[0].count);
+
+    const claimedResult = await pool.query(
+      `SELECT tier FROM referral_tier_claims WHERE user_id = $1`,
+      [u.id]
+    );
+    const claimedTiers = claimedResult.rows.map((r: any) => Number(r.tier));
+
+    const tiers = REFERRAL_TIERS.map((tier) => ({
+      required: tier.required,
+      reward: tier.reward,
+      claimed: claimedTiers.includes(tier.required),
+      claimable:
+        confirmedCount >= tier.required &&
+        !claimedTiers.includes(tier.required),
+    }));
+
+    return {
+      code: telegramId,
+      link: await buildReferralLink(telegramId),
+      confirmedCount,
+      tiers,
+    };
+  } catch (error: any) {
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  }
+});
+
+// Получить награду за уровень рефералов
+app.post('/api/referral/claim', async (req: any, reply) => {
+  let client: any = null;
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const tierRequired = Number(req.body?.tier);
+    const tierDef = REFERRAL_TIERS.find((t) => t.required === tierRequired);
+
+    if (!tierDef) {
+      return reply.code(400).send({ error: 'Такого уровня нет' });
+    }
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)
+      FROM referrals
+      WHERE referrer_id = $1
+      AND confirmed = true
+      `,
+      [u.id]
+    );
+    const confirmedCount = Number(countResult.rows[0].count);
+
+    if (confirmedCount < tierDef.required) {
+      return reply.code(400).send({ error: 'Недостаточно рефералов' });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `
+      SELECT 1
+      FROM referral_tier_claims
+      WHERE user_id = $1
+      AND tier = $2
+      `,
+      [u.id, tierDef.required]
+    );
+
+    if (existing.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return reply.code(400).send({ error: 'Уже получено' });
+    }
+
+    await client.query(
+      `
+      INSERT INTO referral_tier_claims (user_id, tier)
+      VALUES ($1, $2)
+      `,
+      [u.id, tierDef.required]
+    );
+
+    await tx(client, u.id, tierDef.reward, 'referral_tier', {
+      tier: tierDef.required,
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await user(telegramId);
+    return {
+      balance: Number(updated.balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
 app.get('/api/tasks', async (req: any, reply) => {
   try {
     const u = await user(auth(req));
@@ -319,6 +587,18 @@ app.post('/api/tasks/:id/claim', async (req: any, reply) => {
       return reply.code(400).send({
         error: 'Задание уже выполнено',
       });
+    }
+
+    if (task.channel_url) {
+      const channelUsername = extractChannelUsername(task.channel_url);
+      if (channelUsername) {
+        const subscribed = await isSubscribed(channelUsername, telegramId);
+        if (!subscribed) {
+          return reply.code(400).send({
+            error: 'Сначала подпишись на канал',
+          });
+        }
+      }
     }
 
     await client.query('BEGIN');
@@ -1046,6 +1326,38 @@ app.post('/api/admin/tasks', async (req: any, reply) => {
   );
 
   return result.rows[0];
+});
+
+// Админ: отключить задание (не показывается пользователям)
+app.delete('/api/admin/tasks/:id', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  await pool.query(
+    `UPDATE tasks SET active = false WHERE id = $1`,
+    [req.params.id]
+  );
+
+  return { ok: true };
+});
+
+// Админ: включить обратно ранее отключённое задание
+app.post('/api/admin/tasks/:id/activate', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  await pool.query(
+    `UPDATE tasks SET active = true WHERE id = $1`,
+    [req.params.id]
+  );
+
+  return { ok: true };
 });
 
 // Проверка сервера
