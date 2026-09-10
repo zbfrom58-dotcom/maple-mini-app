@@ -1341,6 +1341,26 @@ app.post('/api/admin/tasks/:id/activate', async (req: any, reply) => {
   return { ok: true };
 });
 
+// Админ: удалить задание навсегда (не просто отключить)
+app.delete('/api/admin/tasks/:id/permanent', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  await pool.query(
+    `DELETE FROM task_completions WHERE task_id = $1`,
+    [req.params.id]
+  );
+  await pool.query(
+    `DELETE FROM tasks WHERE id = $1`,
+    [req.params.id]
+  );
+
+  return { ok: true };
+});
+
 // Админ: найти пользователя по Telegram ID (посмотреть текущий баланс)
 app.get('/api/admin/user/:telegramId', async (req: any, reply) => {
   if (req.headers['x-admin-key'] !== adminKey) {
