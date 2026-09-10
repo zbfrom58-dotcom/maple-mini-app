@@ -176,8 +176,14 @@ async function prepareDatabase() {
       user_id INTEGER NOT NULL REFERENCES users(id),
       nft_id TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      fulfilled BOOLEAN NOT NULL DEFAULT false,
       UNIQUE (user_id, nft_id)
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE nft_purchases
+    ADD COLUMN IF NOT EXISTS fulfilled BOOLEAN NOT NULL DEFAULT false
   `);
 
   await pool.query(`
@@ -1354,6 +1360,181 @@ app.post('/api/admin/tasks/:id/activate', async (req: any, reply) => {
 
   await pool.query(
     `UPDATE tasks SET active = true WHERE id = $1`,
+    [req.params.id]
+  );
+
+  return { ok: true };
+});
+
+// Админ: найти пользователя по Telegram ID (посмотреть текущий баланс)
+app.get('/api/admin/user/:telegramId', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  const result = await pool.query(
+    `SELECT * FROM users WHERE telegram_id = $1`,
+    [String(req.params.telegramId)]
+  );
+  const found = result.rows[0];
+
+  if (!found) {
+    return reply.code(404).send({
+      error: 'Пользователь не найден',
+    });
+  }
+
+  return {
+    telegramId: found.telegram_id,
+    balance: Number(found.balance),
+  };
+});
+
+// Админ: добавить листики пользователю по Telegram ID
+app.post('/api/admin/balance/add', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  const { telegramId, amount } = req.body || {};
+  const numericAmount = Number(amount);
+
+  if (!telegramId || !numericAmount || numericAmount <= 0) {
+    return reply.code(400).send({
+      error: 'Укажи Telegram ID и положительную сумму',
+    });
+  }
+
+  let client: any = null;
+  try {
+    const u = await user(String(telegramId));
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await tx(client, u.id, numericAmount, 'admin_add', {
+      admin: true,
+    });
+    await client.query('COMMIT');
+
+    const result = await pool.query(
+      `SELECT balance FROM users WHERE id = $1`,
+      [u.id]
+    );
+
+    return {
+      telegramId,
+      balance: Number(result.rows[0].balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// Админ: снять листики у пользователя по Telegram ID
+app.post('/api/admin/balance/subtract', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  const { telegramId, amount } = req.body || {};
+  const numericAmount = Number(amount);
+
+  if (!telegramId || !numericAmount || numericAmount <= 0) {
+    return reply.code(400).send({
+      error: 'Укажи Telegram ID и положительную сумму',
+    });
+  }
+
+  let client: any = null;
+  try {
+    const u = await user(String(telegramId));
+
+    if (Number(u.balance) < numericAmount) {
+      return reply.code(400).send({
+        error: 'У пользователя недостаточно листиков',
+      });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await tx(client, u.id, -numericAmount, 'admin_subtract', {
+      admin: true,
+    });
+    await client.query('COMMIT');
+
+    const result = await pool.query(
+      `SELECT balance FROM users WHERE id = $1`,
+      [u.id]
+    );
+
+    return {
+      telegramId,
+      balance: Number(result.rows[0].balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// Админ: список заявок на покупку NFT-подарков
+app.get('/api/admin/nft-purchases', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  const result = await pool.query(
+    `
+    SELECT
+      p.id,
+      p.nft_id,
+      p.fulfilled,
+      p.created_at,
+      u.telegram_id
+    FROM nft_purchases p
+    JOIN users u ON u.id = p.user_id
+    ORDER BY p.created_at DESC
+    `
+  );
+
+  return result.rows;
+});
+
+// Админ: отметить NFT-подарок как выданный
+app.post('/api/admin/nft-purchases/:id/fulfill', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  await pool.query(
+    `UPDATE nft_purchases SET fulfilled = true WHERE id = $1`,
     [req.params.id]
   );
 
