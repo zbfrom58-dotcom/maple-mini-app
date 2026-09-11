@@ -1310,6 +1310,56 @@ app.post('/api/admin/tasks', async (req: any, reply) => {
 });
 
 // Админ: отключить задание (не показывается пользователям)
+// Админ: изменить существующее задание
+app.patch('/api/admin/tasks/:id', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  const {
+    title,
+    description = '',
+    channelUrl = '',
+    reward,
+  } = req.body || {};
+
+  if (!title) {
+    return reply.code(400).send({
+      error: 'Название задания обязательно',
+    });
+  }
+
+  const result = await pool.query(
+    `
+    UPDATE tasks
+    SET
+      title = $1,
+      description = $2,
+      channel_url = $3,
+      reward = $4
+    WHERE id = $5
+    RETURNING *
+    `,
+    [
+      title,
+      description,
+      channelUrl,
+      Number(reward),
+      req.params.id,
+    ]
+  );
+
+  if (result.rows.length === 0) {
+    return reply.code(404).send({
+      error: 'Задание не найдено',
+    });
+  }
+
+  return result.rows[0];
+});
+
 app.delete('/api/admin/tasks/:id', async (req: any, reply) => {
   if (req.headers['x-admin-key'] !== adminKey) {
     return reply.code(401).send({
