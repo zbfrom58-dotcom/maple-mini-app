@@ -8,6 +8,25 @@ dotenv.config();
 
 const app = Fastify({ logger: true });
 
+// Разрешаем пустое тело для запросов с Content-Type: application/json
+// (иначе Fastify роняет такие запросы с 400 Bad Request до наших обработчиков —
+// именно это ломало кнопку "Получить" в заданиях)
+app.addContentTypeParser(
+  'application/json',
+  { parseAs: 'string' },
+  (req, body, done) => {
+    if (!body) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  }
+);
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
