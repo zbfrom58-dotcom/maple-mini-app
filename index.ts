@@ -129,6 +129,50 @@ async function isSubscribed(channelUsername: string, telegramId: string): Promis
   }
 }
 
+// URL мини-приложения (для кнопки "Играть" в боте)
+const WEBAPP_URL =
+  process.env.WEBAPP_URL || 'https://maple-mini-app-production.up.railway.app/';
+
+// Telegram ID администратора — сюда бот шлёт уведомления о покупках NFT
+const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '';
+
+// Отправить сообщение пользователю от имени бота (не бросает ошибку наружу)
+async function sendTelegramMessage(
+  chatId: string,
+  text: string,
+  replyMarkup?: any
+): Promise<void> {
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        reply_markup: replyMarkup,
+      }),
+    });
+  } catch (error) {
+    app.log.error(error);
+  }
+}
+
+const WELCOME_TEXT = `🍁 Добро пожаловать в «Кленовый листик»!
+
+Здесь ты можешь:
+— выполнять задания и получать листики
+— играть в Мины и Краш
+— приглашать друзей и зарабатывать на рефералах
+— обменивать листики на NFT-подарки
+
+Жми «Играть», чтобы начать!`;
+
+const PLAY_KEYBOARD = {
+  inline_keyboard: [
+    [{ text: '🍁 Играть', web_app: { url: WEBAPP_URL } }],
+  ],
+};
+
 // Создаём таблицы при запуске
 async function prepareDatabase() {
   await pool.query(`
@@ -216,6 +260,38 @@ async function prepareDatabase() {
       (3000000, 1000, true)
     ON CONFLICT DO NOTHING
   `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS daily_notified_at TIMESTAMPTZ
+  `);
+}
+
+// Раз в 10 минут проверяем, у кого снова доступен ежедневный бонус, и оповещаем в боте
+async function checkDailyBonusNotifications() {
+  try {
+    const result = await pool.query(`
+      SELECT id, telegram_id
+      FROM users
+      WHERE last_daily_at IS NOT NULL
+      AND NOW() - last_daily_at >= INTERVAL '24 hours'
+      AND (daily_notified_at IS NULL OR daily_notified_at < last_daily_at)
+    `);
+
+    for (const row of result.rows) {
+      await sendTelegramMessage(
+        String(row.telegram_id),
+        '🍁 Твой ежедневный бонус снова доступен! Заходи забрать 2500 листиков.',
+        PLAY_KEYBOARD
+      );
+      await pool.query(
+        `UPDATE users SET daily_notified_at = NOW() WHERE id = $1`,
+        [row.id]
+      );
+    }
+  } catch (error) {
+    app.log.error(error);
+  }
 }
 
 // Получаем настоящий Telegram ID
@@ -781,6 +857,15 @@ app.post('/api/shop/nft', async (req: any, reply) => {
 
     await client.query('COMMIT');
 
+    if (ADMIN_TELEGRAM_ID) {
+      await sendTelegramMessage(
+        ADMIN_TELEGRAM_ID,
+        `🎁 Новая покупка NFT!\n\nПользователь: ${telegramId}\nПодарок: ${id}\nЦена: ${price.toLocaleString(
+          'ru-RU'
+        )} листиков\n\nЗайди в /admin → вкладка NFT-заявок, чтобы выдать подарок.`
+      );
+    }
+
     const updated = await user(telegramId);
     return {
       balance: Number(updated.balance),
@@ -1139,6 +1224,26 @@ app.post('/telegram/webhook', async (req: any, reply) => {
   try {
     const update = req.body || {};
 
+    // Обычное сообщение боту (например /start)
+    if (update.message && update.message.text) {
+      const text = String(update.message.text).trim();
+      const chatId = update.message.chat.id;
+
+      if (text === '/start' || text.startsWith('/start ')) {
+        await sendTelegramMessage(String(chatId), WELCOME_TEXT, PLAY_KEYBOARD);
+        return { ok: true };
+      }
+
+      // На любое другое сообщение бот тоже отвечает кнопкой "Играть",
+      // чтобы не молчать как обычный webhook-бот без ответа.
+      await sendTelegramMessage(
+        String(chatId),
+        'Жми «Играть», чтобы открыть приложение 🍁',
+        PLAY_KEYBOARD
+      );
+      return { ok: true };
+    }
+
     // Telegram спрашивает, можно ли провести платёж
     if (update.pre_checkout_query) {
       const query = update.pre_checkout_query;
@@ -1412,6 +1517,44 @@ app.delete('/api/admin/tasks/:id/permanent', async (req: any, reply) => {
 });
 
 // Админ: найти пользователя по Telegram ID (посмотреть текущий баланс)
+// Админ: список/поиск пользователей
+app.get('/api/admin/users', async (req: any, reply) => {
+  if (req.headers['x-admin-key'] !== adminKey) {
+    return reply.code(401).send({
+      error: 'Нет доступа',
+    });
+  }
+
+  const search = String(req.query?.search || '').trim();
+
+  const result = search
+    ? await pool.query(
+        `
+        SELECT telegram_id, first_name, balance, last_daily_at
+        FROM users
+        WHERE telegram_id ILIKE $1
+        ORDER BY id DESC
+        LIMIT 100
+        `,
+        [`%${search}%`]
+      )
+    : await pool.query(
+        `
+        SELECT telegram_id, first_name, balance, last_daily_at
+        FROM users
+        ORDER BY id DESC
+        LIMIT 100
+        `
+      );
+
+  return result.rows.map((row: any) => ({
+    telegramId: row.telegram_id,
+    firstName: row.first_name,
+    balance: Number(row.balance),
+    lastDailyAt: row.last_daily_at,
+  }));
+});
+
 app.get('/api/admin/user/:telegramId', async (req: any, reply) => {
   if (req.headers['x-admin-key'] !== adminKey) {
     return reply.code(401).send({
@@ -1470,6 +1613,15 @@ app.post('/api/admin/balance/add', async (req: any, reply) => {
       [u.id]
     );
 
+    await sendTelegramMessage(
+      String(telegramId),
+      `🍁 Администратор начислил тебе ${numericAmount.toLocaleString(
+        'ru-RU'
+      )} листиков!\n\nТвой баланс: ${Number(
+        result.rows[0].balance
+      ).toLocaleString('ru-RU')}`
+    );
+
     return {
       telegramId,
       balance: Number(result.rows[0].balance),
@@ -1525,6 +1677,15 @@ app.post('/api/admin/balance/subtract', async (req: any, reply) => {
     const result = await pool.query(
       `SELECT balance FROM users WHERE id = $1`,
       [u.id]
+    );
+
+    await sendTelegramMessage(
+      String(telegramId),
+      `🍁 Администратор списал у тебя ${numericAmount.toLocaleString(
+        'ru-RU'
+      )} листиков.\n\nТвой баланс: ${Number(
+        result.rows[0].balance
+      ).toLocaleString('ru-RU')}`
     );
 
     return {
@@ -1602,6 +1763,9 @@ async function start() {
       host: '0.0.0.0',
     });
     app.log.info('Maple Mini App запущен');
+
+    setInterval(checkDailyBonusNotifications, 10 * 60 * 1000);
+    checkDailyBonusNotifications();
   } catch (error) {
     app.log.error(error);
     process.exit(1);
