@@ -89,7 +89,82 @@ const NFT_CATALOG: Record<string, number> = {
   'vice-143868': 2500000,
   'pool-67988': 2500000,
   'vice-314974': 2500000,
+  'candle-10719': 5000000,
+  'muffin-30347': 5000000,
 };
+
+// Цена продажи любого NFT из инвентаря (полученного из кейса)
+const INVENTORY_NFT_SELL_PRICE = 2500000;
+
+type CaseItem = {
+  id: string;
+  type: 'nft' | 'leaves';
+  nftItemId?: string;
+  amount?: number;
+  name: string;
+  chance: number; // в процентах, сумма по кейсу = 100
+  emoji: string;
+};
+
+type CaseDef = {
+  id: string;
+  name: string;
+  cost: number;
+  items: CaseItem[];
+};
+
+// Определения кейсов. Сумма chance в каждом кейсе должна быть равна 100.
+const CASE_DEFS: Record<string, CaseDef> = {
+  nft: {
+    id: 'nft',
+    name: 'NFT',
+    cost: 3000000,
+    items: [
+      { id: 'nft_candle', type: 'nft', nftItemId: 'candle-10719', name: 'Love Candle', chance: 3, emoji: '🕯️' },
+      { id: 'nft_muffin', type: 'nft', nftItemId: 'muffin-30347', name: 'Bunny Muffin', chance: 7, emoji: '🧁' },
+      { id: 'nft_icecream', type: 'nft', nftItemId: 'vice-143868', name: 'Vice Cream (Bamboo Ice)', chance: 30, emoji: '🍨' },
+      { id: 'nft_cup', type: 'nft', nftItemId: 'vice-314974', name: 'Vice Cream (Champion Cup)', chance: 30, emoji: '🏆' },
+      { id: 'nft_giraffe', type: 'nft', nftItemId: 'pool-67988', name: 'Pool Float (Giraffe)', chance: 30, emoji: '🦒' },
+    ],
+  },
+  risk: {
+    id: 'risk',
+    name: 'Риск',
+    cost: 500000,
+    items: [
+      { id: 'risk_cup', type: 'nft', nftItemId: 'vice-314974', name: 'Vice Cream (Champion Cup)', chance: 3, emoji: '🏆' },
+      { id: 'risk_1m', type: 'leaves', amount: 1000000, name: '1 000 000 листиков', chance: 7, emoji: '🍁' },
+      { id: 'risk_500k', type: 'leaves', amount: 500000, name: '500 000 листиков', chance: 20, emoji: '🍁' },
+      { id: 'risk_250k', type: 'leaves', amount: 250000, name: '250 000 листиков', chance: 30, emoji: '🍁' },
+      { id: 'risk_100k', type: 'leaves', amount: 100000, name: '100 000 листиков', chance: 40, emoji: '🍁' },
+    ],
+  },
+  mixed: {
+    id: 'mixed',
+    name: 'Смешанный',
+    cost: 1000000,
+    items: [
+      { id: 'mixed_cup', type: 'nft', nftItemId: 'vice-314974', name: 'Vice Cream (Champion Cup)', chance: 5, emoji: '🏆' },
+      { id: 'mixed_giraffe', type: 'nft', nftItemId: 'pool-67988', name: 'Pool Float (Giraffe)', chance: 5, emoji: '🦒' },
+      { id: 'mixed_icecream', type: 'nft', nftItemId: 'vice-143868', name: 'Vice Cream (Bamboo Ice)', chance: 5, emoji: '🍨' },
+      { id: 'mixed_muffin', type: 'nft', nftItemId: 'muffin-30347', name: 'Bunny Muffin', chance: 2, emoji: '🧁' },
+      { id: 'mixed_250k', type: 'leaves', amount: 250000, name: '250 000 листиков', chance: 35, emoji: '🍁' },
+      { id: 'mixed_500k', type: 'leaves', amount: 500000, name: '500 000 листиков', chance: 25, emoji: '🍁' },
+      { id: 'mixed_150k', type: 'leaves', amount: 150000, name: '150 000 листиков', chance: 23, emoji: '🍁' },
+    ],
+  },
+};
+
+// Выбор случайного приза с учётом весов (chance в процентах)
+function pickCaseItem(items: CaseItem[]): CaseItem {
+  const r = Math.random() * 100;
+  let cumulative = 0;
+  for (const item of items) {
+    cumulative += item.chance;
+    if (r < cumulative) return item;
+  }
+  return items[items.length - 1];
+}
 
 // Уровни реферальной программы
 const REFERRAL_TIERS = [
@@ -234,6 +309,19 @@ async function prepareDatabase() {
       status TEXT NOT NULL DEFAULT 'active',
       started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       cashout_multiplier NUMERIC
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_inventory (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      item_id TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      emoji TEXT NOT NULL DEFAULT '🎁',
+      source TEXT NOT NULL DEFAULT 'case',
+      status TEXT NOT NULL DEFAULT 'owned',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 
@@ -916,6 +1004,218 @@ app.post('/api/shop/nft', async (req: any, reply) => {
     if (client) {
       client.release();
     }
+  }
+});
+
+// ===== Кейсы =====
+
+// Список кейсов (для отображения на клиенте)
+app.get('/api/cases', async (_req: any, _reply: any) => {
+  return {
+    cases: Object.values(CASE_DEFS).map((c) => ({
+      id: c.id,
+      name: c.name,
+      cost: c.cost,
+      items: c.items.map((i) => ({
+        name: i.name,
+        chance: i.chance,
+        emoji: i.emoji,
+        type: i.type,
+      })),
+    })),
+  };
+});
+
+// Открыть кейс
+app.post('/api/cases/:caseId/open', async (req: any, reply) => {
+  let client: any = null;
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const caseId = String(req.params.caseId);
+    const caseDef = CASE_DEFS[caseId];
+
+    if (!caseDef) {
+      return reply.code(404).send({ error: 'Кейс не найден' });
+    }
+    if (Number(u.balance) < caseDef.cost) {
+      return reply.code(400).send({ error: 'Недостаточно листиков' });
+    }
+
+    const wonItem = pickCaseItem(caseDef.items);
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    await tx(client, u.id, -caseDef.cost, 'case_open', { caseId });
+
+    if (wonItem.type === 'nft') {
+      await client.query(
+        `
+        INSERT INTO user_inventory (user_id, item_id, item_name, emoji, source)
+        VALUES ($1, $2, $3, $4, 'case')
+        `,
+        [u.id, wonItem.nftItemId, wonItem.name, wonItem.emoji]
+      );
+    } else {
+      await tx(client, u.id, Number(wonItem.amount), 'case_prize', { caseId, item: wonItem.id });
+    }
+
+    await client.query('COMMIT');
+
+    const updated = await user(telegramId);
+    return {
+      result: {
+        type: wonItem.type,
+        name: wonItem.name,
+        emoji: wonItem.emoji,
+        amount: wonItem.amount || null,
+      },
+      balance: Number(updated.balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// ===== Инвентарь =====
+
+// Получить инвентарь пользователя
+app.get('/api/inventory', async (req: any, reply) => {
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+
+    const result = await pool.query(
+      `
+      SELECT id, item_id, item_name, emoji, created_at
+      FROM user_inventory
+      WHERE user_id = $1
+      AND status = 'owned'
+      ORDER BY created_at DESC
+      `,
+      [u.id]
+    );
+
+    return { items: result.rows };
+  } catch (error: any) {
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  }
+});
+
+// Продать предмет из инвентаря
+app.post('/api/inventory/:id/sell', async (req: any, reply) => {
+  let client: any = null;
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const itemId = Number(req.params.id);
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const itemResult = await client.query(
+      `
+      SELECT *
+      FROM user_inventory
+      WHERE id = $1
+      AND user_id = $2
+      FOR UPDATE
+      `,
+      [itemId, u.id]
+    );
+    const item = itemResult.rows[0];
+
+    if (!item) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'Предмет не найден' });
+    }
+    if (item.status !== 'owned') {
+      await client.query('ROLLBACK');
+      return reply.code(400).send({ error: 'Предмет уже использован' });
+    }
+
+    await client.query(
+      `UPDATE user_inventory SET status = 'sold' WHERE id = $1`,
+      [itemId]
+    );
+
+    await tx(client, u.id, INVENTORY_NFT_SELL_PRICE, 'inventory_sell', { itemId });
+
+    await client.query('COMMIT');
+
+    const updated = await user(telegramId);
+    return {
+      win: INVENTORY_NFT_SELL_PRICE,
+      balance: Number(updated.balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// Вывести предмет (передать в личку админу)
+app.post('/api/inventory/:id/withdraw', async (req: any, reply) => {
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const itemId = Number(req.params.id);
+
+    const itemResult = await pool.query(
+      `
+      SELECT *
+      FROM user_inventory
+      WHERE id = $1
+      AND user_id = $2
+      `,
+      [itemId, u.id]
+    );
+    const item = itemResult.rows[0];
+
+    if (!item) {
+      return reply.code(404).send({ error: 'Предмет не найден' });
+    }
+    if (item.status !== 'owned') {
+      return reply.code(400).send({ error: 'Предмет уже использован' });
+    }
+
+    await pool.query(
+      `UPDATE user_inventory SET status = 'withdrawn' WHERE id = $1`,
+      [itemId]
+    );
+
+    if (ADMIN_TELEGRAM_ID) {
+      await sendTelegramMessage(
+        ADMIN_TELEGRAM_ID,
+        `🎁 Запрос на вывод NFT из инвентаря!\n\nПользователь: ${telegramId}\nПодарок: ${item.item_name} (${item.item_id})\n\nСвяжись с игроком, чтобы передать подарок.`
+      );
+    }
+
+    return { ok: true };
+  } catch (error: any) {
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
   }
 });
 
