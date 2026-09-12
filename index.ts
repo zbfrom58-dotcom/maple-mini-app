@@ -55,6 +55,10 @@ app.get('/admin', async (_, reply) => {
 const MINES_TOTAL_CELLS = 25;
 const MINES_HOUSE_EDGE = 0.97; // 3% преимущество казино
 
+const CARDS_PER_ROUND = 3; // из них 1 проигрышная
+const CARDS_BASE_MULTIPLIER = 1.5; // множитель за первый успешный раунд
+const CARDS_HOUSE_EDGE = 0.97; // 3% преимущество казино
+
 // Множитель в игре "Мины" — стандартная комбинаторная формула
 function minesMultiplier(minesCount: number, opened: number): number {
   let product = 1;
@@ -230,6 +234,18 @@ async function prepareDatabase() {
       status TEXT NOT NULL DEFAULT 'active',
       started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       cashout_multiplier NUMERIC
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS card_games (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      bet BIGINT NOT NULL,
+      round INTEGER NOT NULL DEFAULT 0,
+      multiplier NUMERIC NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 
@@ -1071,6 +1087,196 @@ app.post('/api/games/mines/:id/cashout', async (req: any, reply) => {
     );
 
     await tx(client, u.id, payout, 'mines_win', { gameId, multiplier });
+
+    await client.query('COMMIT');
+
+    const updated = await user(telegramId);
+    return {
+      win: payout,
+      balance: Number(updated.balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// ===== Игра "Карты" =====
+// Правила: каждый раунд 3 карты, 1 из них проигрышная.
+// Первый успешный раунд даёт множитель x1.5, каждый следующий успешный раунд удваивает текущий множитель.
+// Забрать выигрыш можно после любого успешного раунда.
+
+function cardsNextMultiplier(currentMultiplier: number, round: number): number {
+  if (round === 0) {
+    return CARDS_BASE_MULTIPLIER * CARDS_HOUSE_EDGE;
+  }
+  return currentMultiplier * 2;
+}
+
+// Начать игру
+app.post('/api/games/cards', async (req: any, reply) => {
+  let client: any = null;
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const { bet } = req.body || {};
+    const numericBet = Number(bet);
+
+    if (!numericBet || numericBet < 1) {
+      return reply.code(400).send({ error: 'Некорректная ставка' });
+    }
+    if (Number(u.balance) < numericBet) {
+      return reply.code(400).send({ error: 'Недостаточно листиков' });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    await tx(client, u.id, -numericBet, 'cards_bet', {});
+
+    const gameResult = await client.query(
+      `
+      INSERT INTO card_games (user_id, bet)
+      VALUES ($1, $2)
+      RETURNING id
+      `,
+      [u.id, numericBet]
+    );
+
+    await client.query('COMMIT');
+
+    const updated = await user(telegramId);
+    return {
+      gameId: gameResult.rows[0].id,
+      balance: Number(updated.balance),
+    };
+  } catch (error: any) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+// Открыть карту
+app.post('/api/games/cards/:id/pick', async (req: any, reply) => {
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const gameId = Number(req.params.id);
+    const cardIndex = Number(req.body?.cardIndex);
+
+    if (Number.isNaN(cardIndex) || cardIndex < 0 || cardIndex >= CARDS_PER_ROUND) {
+      return reply.code(400).send({ error: 'Некорректная карта' });
+    }
+
+    const gameResult = await pool.query(
+      `
+      SELECT *
+      FROM card_games
+      WHERE id = $1
+      AND user_id = $2
+      `,
+      [gameId, u.id]
+    );
+    const game = gameResult.rows[0];
+
+    if (!game) {
+      return reply.code(404).send({ error: 'Игра не найдена' });
+    }
+    if (game.status !== 'active') {
+      return reply.code(400).send({ error: 'Игра уже завершена' });
+    }
+
+    const losingIndex = Math.floor(Math.random() * CARDS_PER_ROUND);
+
+    if (cardIndex === losingIndex) {
+      await pool.query(
+        `UPDATE card_games SET status = 'lost' WHERE id = $1`,
+        [gameId]
+      );
+      const updated = await user(telegramId);
+      return { lost: true, losingIndex, balance: Number(updated.balance) };
+    }
+
+    const newRound = game.round + 1;
+    const newMultiplier = cardsNextMultiplier(Number(game.multiplier), game.round);
+
+    await pool.query(
+      `UPDATE card_games SET round = $1, multiplier = $2 WHERE id = $3`,
+      [newRound, newMultiplier, gameId]
+    );
+
+    return {
+      lost: false,
+      losingIndex,
+      state: { round: newRound, multiplier: newMultiplier },
+    };
+  } catch (error: any) {
+    return reply.code(error.statusCode || 500).send({
+      error: error.message || 'Ошибка',
+    });
+  }
+});
+
+// Забрать выигрыш
+app.post('/api/games/cards/:id/cashout', async (req: any, reply) => {
+  let client: any = null;
+  try {
+    const telegramId = auth(req);
+    const u = await user(telegramId);
+    const gameId = Number(req.params.id);
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const gameResult = await client.query(
+      `
+      SELECT *
+      FROM card_games
+      WHERE id = $1
+      AND user_id = $2
+      FOR UPDATE
+      `,
+      [gameId, u.id]
+    );
+    const game = gameResult.rows[0];
+
+    if (!game) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'Игра не найдена' });
+    }
+    if (game.status !== 'active') {
+      await client.query('ROLLBACK');
+      return reply.code(400).send({ error: 'Игра уже завершена' });
+    }
+    if (game.round < 1) {
+      await client.query('ROLLBACK');
+      return reply.code(400).send({ error: 'Нужно открыть хотя бы одну карту' });
+    }
+
+    const payout = Math.floor(Number(game.bet) * Number(game.multiplier));
+
+    await client.query(
+      `UPDATE card_games SET status = 'cashed' WHERE id = $1`,
+      [gameId]
+    );
+
+    await tx(client, u.id, payout, 'cards_win', { gameId, multiplier: game.multiplier });
 
     await client.query('COMMIT');
 
