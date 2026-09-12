@@ -326,6 +326,11 @@ async function prepareDatabase() {
   `);
 
   await pool.query(`
+    ALTER TABLE user_inventory
+    ADD COLUMN IF NOT EXISTS fulfilled BOOLEAN NOT NULL DEFAULT false
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS card_games (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
@@ -2242,21 +2247,38 @@ app.get('/api/admin/nft-purchases', async (req: any, reply) => {
   const result = await pool.query(
     `
     SELECT
-      p.id,
-      p.nft_id,
+      'shop-' || p.id AS id,
+      p.nft_id AS item_id,
+      p.nft_id AS item_name,
+      'shop' AS source,
       p.fulfilled,
       p.created_at,
       u.telegram_id
     FROM nft_purchases p
     JOIN users u ON u.id = p.user_id
-    ORDER BY p.created_at DESC
+
+    UNION ALL
+
+    SELECT
+      'case-' || i.id AS id,
+      i.item_id AS item_id,
+      i.item_name AS item_name,
+      'case' AS source,
+      i.fulfilled,
+      i.created_at,
+      u.telegram_id
+    FROM user_inventory i
+    JOIN users u ON u.id = i.user_id
+    WHERE i.status = 'withdrawn'
+
+    ORDER BY created_at DESC
     `
   );
 
   return result.rows;
 });
 
-// Админ: отметить NFT-подарок как выданный
+// Админ: отметить NFT-подарок как выданный (и из магазина, и из инвентаря/кейсов)
 app.post('/api/admin/nft-purchases/:id/fulfill', async (req: any, reply) => {
   if (req.headers['x-admin-key'] !== adminKey) {
     return reply.code(401).send({
@@ -2264,10 +2286,28 @@ app.post('/api/admin/nft-purchases/:id/fulfill', async (req: any, reply) => {
     });
   }
 
-  await pool.query(
-    `UPDATE nft_purchases SET fulfilled = true WHERE id = $1`,
-    [req.params.id]
-  );
+  const rawId = String(req.params.id);
+
+  if (rawId.startsWith('shop-')) {
+    const realId = rawId.slice(5);
+    await pool.query(
+      `UPDATE nft_purchases SET fulfilled = true WHERE id = $1`,
+      [realId]
+    );
+  } else if (rawId.startsWith('case-')) {
+    const realId = rawId.slice(5);
+    await pool.query(
+      `UPDATE user_inventory SET fulfilled = true WHERE id = $1`,
+      [realId]
+    );
+  } else {
+    // Обратная совместимость: если пришёл просто числовой id без префикса,
+    // считаем, что это заявка из магазина (старый формат)
+    await pool.query(
+      `UPDATE nft_purchases SET fulfilled = true WHERE id = $1`,
+      [rawId]
+    );
+  }
 
   return { ok: true };
 });

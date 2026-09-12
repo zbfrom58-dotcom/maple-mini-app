@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Админка — Кленовый листик</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101010;color:#fff;font:15px Arial,sans-serif}
+.app{max-width:600px;margin:auto;padding:20px 16px 60px}
+.logo{font-size:24px;font-weight:900;font-style:italic;margin-bottom:20px}
+.card{background:#1c1c1c;border:1px solid #333;border-radius:18px;padding:18px;margin-bottom:16px}
+.title{font-size:18px;font-weight:bold;margin:22px 0 10px}
+label{display:block;font-size:13px;color:#999;margin:10px 0 5px}
+input,textarea{width:100%;background:#292929;border:1px solid #444;color:#fff;border-radius:10px;padding:11px;font-size:14px;font-family:inherit}
+textarea{resize:vertical;min-height:60px}
+button{border:0;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:bold;cursor:pointer;color:#fff;background:#333}
+button:disabled{opacity:.45}
+.primary{background:linear-gradient(135deg,#ffb21c,#ff7b00);color:#111;width:100%;margin-top:14px}
+.blue{background:#315cff}
+.red{background:#7b2020}
+.green{background:#198754}
+.task{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:12px 0;border-bottom:1px solid #333}
+.task:last-child{border-bottom:0}
+.task .info{flex:1}
+.task .muted{color:#999;font-size:13px;margin-top:3px}
+.inactive{opacity:.45}
+.message{text-align:center;color:#ffb21c;min-height:20px;margin:10px 0}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:8px;margin-left:6px}
+.badge.on{background:#198754}
+.badge.off{background:#555}
+.loading{text-align:center;color:#999;padding:20px}
+.tabs{display:flex;gap:8px;margin-bottom:18px;overflow-x:auto}
+.tab-btn{background:#222;color:#999;flex:1;white-space:nowrap}
+.tab-btn.active{background:#ffb21c;color:#111}
+.tab-content{display:none}
+.tab-content.active{display:block}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="logo">🍁 Админка</div>
+<div id="message" class="message"></div>
+
+<div class="card">
+<label>Админ-ключ (ADMIN_KEY из Railway)</label>
+<input id="adminKey" type="password" placeholder="Введи ключ">
+<button class="primary" onclick="saveKeyAndLoad()">Войти</button>
+</div>
+
+<div id="mainArea" style="display:none">
+
+<div class="tabs">
+<button class="tab-btn active" id="tabBtn-tasks" onclick="switchTab('tasks')">📋 Задания</button>
+<button class="tab-btn" id="tabBtn-users" onclick="switchTab('users')">👤 Пользователи</button>
+<button class="tab-btn" id="tabBtn-nft" onclick="switchTab('nft')">🎁 NFT</button>
+</div>
+
+<div id="tab-tasks" class="tab-content active">
+
+<div class="title" id="taskFormTitle">➕ Новое задание</div>
+<div class="card">
+<label>Название</label>
+<input id="taskTitle" placeholder="Подписка на канал">
+<label>Описание</label>
+<textarea id="taskDescription" placeholder="Подпишись и получи листики"></textarea>
+<label>Ссылка на канал (необязательно)</label>
+<input id="taskChannelUrl" placeholder="https://t.me/твой_канал">
+<label>Награда (листики)</label>
+<input id="taskReward" type="number" value="10000">
+<div style="display:flex;gap:10px;margin-top:14px">
+<button class="primary" style="margin-top:0;flex:1" id="taskSubmitBtn" onclick="createTask()">Создать задание</button>
+<button id="taskCancelBtn" style="display:none" onclick="cancelEditTask()">Отмена</button>
+</div>
+</div>
+
+<div class="title">📋 Все задания</div>
+<div id="tasksList" class="card"><div class="loading">Загрузка...</div></div>
+
+</div>
+
+<div id="tab-users" class="tab-content">
+
+<div class="title">👤 Пользователи</div>
+<div class="card">
+<label>Поиск по Telegram ID</label>
+<input id="userSearch" placeholder="Оставь пустым, чтобы показать всех" oninput="debounceSearchUsers()">
+</div>
+
+<div id="usersList" class="card"><div class="loading">Загрузка...</div></div>
+
+</div>
+
+<div id="tab-nft" class="tab-content">
+
+<div class="title">🎁 Заявки на NFT-подарки</div>
+<div id="nftList" class="card"><div class="loading">Загрузка...</div></div>
+
+</div>
+
+</div>
+</div>
+
+<script>
+function getKey(){return localStorage.getItem('adminKey')||''}
+function setKey(k){localStorage.setItem('adminKey',k)}
+function msg(t){const e=document.getElementById('message');e.textContent=t;clearTimeout(msg.timer);msg.timer=setTimeout(()=>e.textContent='',4000)}
+
+async function api(url,opt={}){
+  const r=await fetch(url,{...opt,headers:{'Content-Type':'application/json','x-admin-key':getKey(),...(opt.headers||{})}});
+  let d={};try{d=await r.json()}catch{}
+  if(!r.ok)throw Error(d.error||'Ошибка запроса');
+  return d;
+}
+
+function esc(t){return String(t??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')}
+
+function switchTab(name){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  document.getElementById('tabBtn-'+name).classList.add('active');
+}
+
+async function saveKeyAndLoad(){
+  const key=document.getElementById('adminKey').value.trim();
+  if(!key){msg('Введи ключ');return}
+  setKey(key);
+  try{
+    await loadTasks();
+    await loadNftPurchases();
+    await searchUsers();
+    document.getElementById('mainArea').style.display='block';
+    msg('🍁 Готово');
+  }catch(e){
+    msg('Неверный ключ или ошибка сети: '+e.message);
+  }
+}
+
+// ===== Пользователи =====
+
+let userSearchTimer=null;
+function debounceSearchUsers(){
+  clearTimeout(userSearchTimer);
+  userSearchTimer=setTimeout(searchUsers,400);
+}
+
+async function searchUsers(){
+  const list=document.getElementById('usersList');
+  const query=document.getElementById('userSearch').value.trim();
+  list.innerHTML='<div class="loading">Загрузка...</div>';
+  const users=await api('/api/admin/users'+(query?('?search='+encodeURIComponent(query)):''));
+  if(!users.length){
+    list.innerHTML='<div class="muted" style="text-align:center">Пользователи не найдены</div>';
+    return;
+  }
+  list.innerHTML=users.map(u=>{
+    const last=u.lastDailyAt?new Date(u.lastDailyAt).toLocaleString('ru-RU'):'—';
+    return `
+    <div class="task">
+      <div class="info">
+        <b>${esc(u.firstName||'Игрок')}</b>
+        <div class="muted">Telegram ID: ${esc(u.telegramId)}</div>
+        <div class="muted">Баланс: 🍁 ${Number(u.balance).toLocaleString('ru-RU')}</div>
+        <div class="muted">Последний бонус: ${last}</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input type="number" placeholder="Сумма" id="amt-${esc(u.telegramId)}" style="flex:1">
+          <button class="green" onclick="adjustUserBalance('${esc(u.telegramId)}','add')">+</button>
+          <button class="red" onclick="adjustUserBalance('${esc(u.telegramId)}','subtract')">−</button>
+        </div>
+      </div>
+    </div>
+  `}).join('');
+}
+
+async function adjustUserBalance(telegramId,action){
+  const input=document.getElementById('amt-'+telegramId);
+  const amount=Number(input.value);
+  if(!amount||amount<=0){msg('Введи корректную сумму');return}
+  try{
+    await api('/api/admin/balance/'+action,{method:'POST',body:JSON.stringify({telegramId,amount})});
+    msg(action==='add'?'🍁 Баланс пополнен':'🍁 Баланс уменьшен');
+    searchUsers();
+  }catch(e){
+    msg(e.message);
+  }
+}
+
+// ===== NFT-заявки =====
+
+async function loadNftPurchases(){
+  const list=document.getElementById('nftList');
+  list.innerHTML='<div class="loading">Загрузка...</div>';
+  const purchases=await api('/api/admin/nft-purchases');
+  if(!purchases.length){
+    list.innerHTML='<div class="muted" style="text-align:center">Заявок пока нет</div>';
+    return;
+  }
+  list.innerHTML=purchases.map(p=>{
+    const date=new Date(p.created_at).toLocaleString('ru-RU');
+    const sourceLabel=p.source==='case'?'🎲 Кейс':'🛒 Магазин';
+    return `
+    <div class="task ${p.fulfilled?'inactive':''}">
+      <div class="info">
+        <b>${esc(p.item_name)}</b>
+        <span class="badge ${p.fulfilled?'on':'off'}">${p.fulfilled?'Выдано':'Ожидает'}</span>
+        <div class="muted">${sourceLabel}</div>
+        <div class="muted">Telegram ID: ${esc(p.telegram_id)}</div>
+        <div class="muted">${date}</div>
+      </div>
+      ${p.fulfilled?'':`<button class="green" onclick="fulfillNft('${p.id}')">Отметить выданным</button>`}
+    </div>
+  `}).join('');
+}
+
+async function fulfillNft(id){
+  try{
+    await api('/api/admin/nft-purchases/'+id+'/fulfill',{method:'POST'});
+    msg('🍁 Отмечено как выдано');
+    loadNftPurchases();
+  }catch(e){
+    msg(e.message);
+  }
+}
+
+// ===== Задания =====
+
+let currentTasks=[];
+async function loadTasks(){
+  const list=document.getElementById('tasksList');
+  list.innerHTML='<div class="loading">Загрузка...</div>';
+  const tasks=await api('/api/admin/tasks');
+  currentTasks=tasks;
+  if(!tasks.length){
+    list.innerHTML='<div class="muted" style="text-align:center">Заданий пока нет</div>';
+    return;
+  }
+  list.innerHTML=tasks.map(t=>`
+    <div class="task ${t.active?'':'inactive'}">
+      <div class="info">
+        <b>${esc(t.title)}</b>
+        <span class="badge ${t.active?'on':'off'}">${t.active?'Активно':'Отключено'}</span>
+        <div class="muted">${esc(t.description||'')}</div>
+        ${t.channel_url?`<div class="muted">${esc(t.channel_url)}</div>`:''}
+        <div class="muted">Награда: 🍁 ${Number(t.reward).toLocaleString('ru-RU')}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="blue" onclick="startEditTask(${t.id})">Изменить</button>
+        <button class="${t.active?'red':'green'}" onclick="toggleTask(${t.id},${t.active})">${t.active?'Отключить':'Включить'}</button>
+        <button class="red" onclick="deleteTaskForever(${t.id})">Удалить навсегда</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+let editingTaskId=null;
+
+function startEditTask(id){
+  const t=currentTasks.find(x=>x.id===id);
+  if(!t)return;
+  editingTaskId=id;
+  document.getElementById('taskTitle').value=t.title||'';
+  document.getElementById('taskDescription').value=t.description||'';
+  document.getElementById('taskChannelUrl').value=t.channel_url||'';
+  document.getElementById('taskReward').value=t.reward||10000;
+  document.getElementById('taskFormTitle').textContent='✏️ Изменить задание';
+  document.getElementById('taskSubmitBtn').textContent='Сохранить изменения';
+  document.getElementById('taskCancelBtn').style.display='block';
+  window.scrollTo(0,0);
+}
+
+function cancelEditTask(){
+  editingTaskId=null;
+  document.getElementById('taskTitle').value='';
+  document.getElementById('taskDescription').value='';
+  document.getElementById('taskChannelUrl').value='';
+  document.getElementById('taskReward').value='10000';
+  document.getElementById('taskFormTitle').textContent='➕ Новое задание';
+  document.getElementById('taskSubmitBtn').textContent='Создать задание';
+  document.getElementById('taskCancelBtn').style.display='none';
+}
+
+async function createTask(){
+  const title=document.getElementById('taskTitle').value.trim();
+  const description=document.getElementById('taskDescription').value.trim();
+  const channelUrl=document.getElementById('taskChannelUrl').value.trim();
+  const reward=Number(document.getElementById('taskReward').value)||10000;
+
+  if(!title){msg('Введи название задания');return}
+
+  try{
+    if(editingTaskId){
+      await api('/api/admin/tasks/'+editingTaskId,{method:'PATCH',body:JSON.stringify({title,description,channelUrl,reward})});
+      msg('🍁 Задание обновлено');
+      cancelEditTask();
+    }else{
+      await api('/api/admin/tasks',{method:'POST',body:JSON.stringify({title,description,channelUrl,reward})});
+      document.getElementById('taskTitle').value='';
+      document.getElementById('taskDescription').value='';
+      document.getElementById('taskChannelUrl').value='';
+      document.getElementById('taskReward').value='10000';
+      msg('🍁 Задание создано');
+    }
+    loadTasks();
+  }catch(e){
+    msg(e.message);
+  }
+}
+
+async function toggleTask(id,isActive){
+  try{
+    if(isActive){
+      await api('/api/admin/tasks/'+id,{method:'DELETE'});
+    }else{
+      await api('/api/admin/tasks/'+id+'/activate',{method:'POST'});
+    }
+    loadTasks();
+  }catch(e){
+    msg(e.message);
+  }
+}
+
+async function deleteTaskForever(id){
+  if(!confirm('Удалить задание навсегда? Это нельзя отменить.'))return;
+  try{
+    await api('/api/admin/tasks/'+id+'/permanent',{method:'DELETE'});
+    msg('🍁 Задание удалено навсегда');
+    loadTasks();
+  }catch(e){
+    msg(e.message);
+  }
+}
+
+// автологин если ключ уже сохранён
+if(getKey()){
+  document.getElementById('adminKey').value=getKey();
+  saveKeyAndLoad();
+}
+</script>
+</body>
+</html>
