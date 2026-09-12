@@ -1026,6 +1026,7 @@ app.get('/api/cases', async (_req: any, _reply: any) => {
         chance: i.chance,
         emoji: i.emoji,
         type: i.type,
+        nftItemId: i.nftItemId || null,
       })),
     })),
   };
@@ -1075,6 +1076,7 @@ app.post('/api/cases/:caseId/open', async (req: any, reply) => {
         name: wonItem.name,
         emoji: wonItem.emoji,
         amount: wonItem.amount || null,
+        nftItemId: wonItem.nftItemId || null,
       },
       balance: Number(updated.balance),
     };
