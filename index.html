@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Кленовый листик</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101010;color:#fff;font:15px Arial,sans-serif}
+.app{max-width:520px;margin:auto;padding:18px 16px 100px}.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.logo{font-size:27px;font-weight:900;font-style:italic}.balance,.money,.price,.reward{color:#ffb21c}.balance{background:#272727;border-radius:20px;padding:9px 14px;font-weight:bold}
+.card{background:#1c1c1c;border:1px solid #333;border-radius:22px;padding:18px;margin-bottom:16px}.center{text-align:center}
+.big{font-size:42px;font-weight:900;color:#ffb21c;margin:8px 0}.muted{color:#999;font-size:14px}
+.title{font-size:21px;font-weight:bold;margin:22px 0 12px}button{border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:bold;cursor:pointer;color:#fff;background:#333}
+button:disabled{opacity:.45}.primary{background:linear-gradient(135deg,#ffb21c,#ff7b00);color:#111;width:100%}.blue{background:#315cff}.green{background:#198754}
+.hidden{display:none!important}.shop-tabs{display:flex;gap:8px;margin-bottom:12px}.shop-tab{flex:1}.shop-tab.active{background:#ffb21c;color:#111}.crash-wrap{position:relative;height:260px;overflow:hidden;background:#151515;border-radius:18px;border:1px solid #333}.crash-svg{width:100%;height:100%}.crash-mult{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:56px;font-weight:900;color:#ffb21c}.crash-status{text-align:center;color:#aaa;margin:10px 0}.bet-input{width:100%;background:#292929;border:1px solid #444;color:#fff;border-radius:12px;padding:14px;font-size:18px;margin:8px 0}.message{text-align:center;color:#ffb21c;min-height:20px;margin:10px 0}.loading{text-align:center;color:#999;padding:25px}
+.task,.shop{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid #333}.task:last-child,.shop:last-child{border-bottom:0}
+.info{flex:1}.reward,.price{font-size:13px;margin-top:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.bombs{grid-template-columns:repeat(6,1fr)}
+.selected{background:#315cff!important}.mines{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-top:15px}.cell{aspect-ratio:1;padding:0;border-radius:10px;background:#171717;border:1px solid #333;font-size:20px}.cell.open{border-color:#ffb21c}.cell.bomb{background:#7b2020}
+.nav{position:fixed;bottom:0;left:0;right:0;background:#171717;border-top:1px solid #333;display:flex;justify-content:flex-start;gap:2px;padding:9px 4px;z-index:5;overflow-x:auto;-webkit-overflow-scrolling:touch}.nav button{flex:0 0 auto;min-width:70px;background:transparent;color:#888;font-size:11px;padding:9px 6px}.nav button.active{color:#fff}
+.case-card{background:#1c1c1c;border:1px solid #333;border-radius:18px;padding:16px;margin-bottom:14px}.case-cost{color:#ffb21c;font-weight:bold;margin:6px 0 12px}
+.reel-wrap{position:relative;height:96px;overflow:hidden;background:#0d0d0d;border-radius:14px;border:1px solid #333;margin:14px 0}
+.reel-track{display:flex;position:absolute;top:0;left:0;height:100%;will-change:transform}
+.reel-item{flex:0 0 90px;height:90px;margin:3px;display:flex;align-items:center;justify-content:center;font-size:40px;background:#1c1c1c;border-radius:12px;border:1px solid #333}
+.reel-marker{position:absolute;top:0;bottom:0;left:50%;width:3px;background:#ffb21c;transform:translateX(-1.5px);z-index:2}
+.reel-result{text-align:center;margin-top:10px;font-weight:bold;font-size:16px}
+.inv-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid #333}.inv-item:last-child{border-bottom:0}
+.back-btn{background:#272727;color:#fff;padding:10px 16px;border-radius:12px;margin-bottom:16px;font-size:14px;display:inline-flex;align-items:center;gap:6px}
+.case-preview{display:flex;gap:6px;margin:10px 0 14px}
+.gift-icon{width:46px;height:46px;border-radius:12px;background:#151515;border:1px solid #333;display:flex;align-items:center;justify-content:center;font-size:24px;overflow:hidden;flex:0 0 46px}
+.gift-icon svg{width:100%!important;height:100%!important}
+.prize-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #333}.prize-row:last-child{border-bottom:0}
+.prize-row .gift-icon{width:52px;height:52px;flex:0 0 52px;font-size:28px}
+.prize-info{flex:1}.prize-name{font-weight:bold}.prize-chance{color:#999;font-size:13px;margin-top:2px}
+.reveal-icon{width:110px;height:110px;font-size:56px;margin:0 auto 10px}
+.inv-item .gift-icon{width:44px;height:44px;font-size:22px}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="header"><div class="logo">🍁 МИНИ</div><div class="balance">🍁 <span id="topBalance">0</span></div></div>
+<div id="message" class="message"></div>
+
+<section id="homePage">
+<div class="card center"><div class="muted">Твой баланс</div><div id="mainBalance" class="big">0</div><div class="muted">Кленовых листиков</div></div>
+<div class="title">🎁 Ежедневный бонус</div>
+<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px"><div><b>2500 листиков</b><div class="muted">Заходи каждый день</div></div><span style="font-size:32px">🍁</span></div><button id="dailyBtn" class="primary" onclick="getDaily()">Получить бонус</button></div>
+</section>
+
+<section id="tasksPage" class="hidden"><div class="title">📋 Задания</div><div id="tasksList" class="card"><div class="loading">Загрузка заданий...</div></div>
+<div class="title">👥 Пригласи друзей</div>
+<div class="card">
+<div class="muted" style="margin-bottom:12px">Реферал засчитывается, когда приглашённый друг заберёт свой ежедневный бонус.</div>
+<button class="primary" onclick="showReferralLink()">Заработать на рефералах</button>
+<div id="referralLinkBox" class="hidden" style="margin-top:12px">
+<div class="muted">Твоя уникальная ссылка</div>
+<div id="referralLinkText" style="word-break:break-all;background:#272727;padding:10px;border-radius:10px;margin:8px 0;font-size:13px"></div>
+<button class="blue" onclick="copyReferralLink()">Скопировать</button>
+</div>
+<div id="referralTiers" style="margin-top:16px"><div class="loading">Загрузка...</div></div>
+</div>
+</section>
+
+<section id="gamesPage" class="hidden">
+<div class="title">🎮 Игры</div>
+<div class="shop-tabs"><button id="minesTab" class="shop-tab active" onclick="showGameTab('mines')">💣 Мины</button><button id="crashTab" class="shop-tab" onclick="showGameTab('crash')">🚀 Краш</button><button id="cardsTab" class="shop-tab" onclick="showGameTab('cards')">🃏 Карты</button></div>
+
+<div id="minesSubPage"><div class="card">
+<div class="title" style="font-size:16px">Ставка в листиках</div><input id="betInput" class="bet-input" type="number" min="1" value="50" placeholder="Введите свою ставку" oninput="document.querySelectorAll('#minesSubPage .grid:not(.bombs) button').forEach(b=>b.classList.remove('selected'))"><div class="grid"><button onclick="setBet(50)" id="bet50">50</button><button onclick="setBet(500)" id="bet500">500</button><button onclick="setBet(1000)" id="bet1000">1000</button><button onclick="setBet(5000)" id="bet5000">5000</button></div>
+<div class="title" style="font-size:16px">Количество бомб</div><div id="bombGrid" class="grid bombs"></div>
+<button id="startBtn" class="primary" style="margin-top:16px" onclick="startGame()">НАЧАТЬ ИГРУ</button>
+<div id="gameArea" class="hidden"><div class="muted center" style="margin-top:18px">Нажимай на клетки. Не попадись на бомбу!</div><div class="card center" style="margin:12px 0"><div class="muted">Текущий выигрыш</div><div id="minesWinAmount" class="big">0</div></div><div id="mineGrid" class="mines"></div><button class="primary" style="margin-top:16px" onclick="cashOut()">ЗАБРАТЬ ВЫИГРЫШ</button></div>
+</div></div>
+
+<div id="crashSubPage" class="hidden"><div class="card"><div class="crash-wrap"><svg class="crash-svg" viewBox="0 0 500 260"><path id="crashLine" d="M 10 230 Q 120 200 240 150 T 490 30" fill="none" stroke="#ff5277" stroke-width="7" stroke-linecap="round"/><circle cx="490" cy="30" r="8" fill="#fff"/></svg><div id="crashMultiplier" class="crash-mult">1.00x</div></div><div id="crashStatus" class="crash-status">Сделайте ставку, чтобы начать раунд</div><div class="title" style="font-size:16px">Ставка в листиках</div><input id="crashBetInput" class="bet-input" type="number" min="1" value="50"><div class="grid"><button onclick="setCrashBet(50)">50</button><button onclick="setCrashBet(500)">500</button><button onclick="setCrashBet(1000)">1000</button><button onclick="setCrashBet(5000)">5000</button></div><button id="crashBetBtn" class="primary" style="margin-top:16px" onclick="placeCrashBet()">СДЕЛАТЬ СТАВКУ</button><button id="crashCashoutBtn" class="green hidden" style="width:100%;margin-top:10px" onclick="cashoutCrash()">ЗАБРАТЬ ВЫИГРЫШ</button></div></div>
+
+<div id="cardsSubPage" class="hidden"><div class="card">
+<div class="muted" style="margin-bottom:10px">Максимальный множитель: <b style="color:#ffb21c">x9.99</b> — при достижении выигрыш забирается автоматически</div>
+<div class="title" style="font-size:16px">Ставка в листиках</div><input id="cardsBetInput" class="bet-input" type="number" min="1" value="50" placeholder="Введите свою ставку" oninput="document.querySelectorAll('#cardsSubPage .grid button').forEach(b=>b.classList.remove('selected'))"><div class="grid"><button onclick="setCardsBet(50)" id="cardsBet50">50</button><button onclick="setCardsBet(500)" id="cardsBet500">500</button><button onclick="setCardsBet(1000)" id="cardsBet1000">1000</button><button onclick="setCardsBet(5000)" id="cardsBet5000">5000</button></div>
+<button id="cardsStartBtn" class="primary" style="margin-top:16px" onclick="startCardsGame()">НАЧАТЬ ИГРУ</button>
+<div id="cardsArea" class="hidden">
+<div class="muted center" style="margin-top:18px">Выбери карту. Одна из трёх — проигрышная!</div>
+<div class="card center" style="margin:12px 0"><div class="muted">Текущий выигрыш</div><div id="cardsWinAmount" class="big">0</div><div class="muted">Множитель: <span id="cardsMultiplierText">—</span></div></div>
+<div id="cardsGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px"></div>
+<button id="cardsCashoutBtn" class="green hidden" style="width:100%;margin-top:16px" onclick="cardsCashOut()">ЗАБРАТЬ ВЫИГРЫШ</button>
+</div>
+</div></div>
+
+</section><section id="shopPage" class="hidden">
+<div class="title">🛒 Магазин</div>
+<div class="shop-tabs"><button id="leavesTab" class="shop-tab active" onclick="showShopTab('leaves')">🍁 Листики</button><button id="nftTab" class="shop-tab" onclick="showShopTab('nft')">🎁 NFT-подарки</button><button id="casesTab" class="shop-tab" onclick="showShopTab('cases')">🎲 Кейсы</button></div>
+<div id="leavesShopTab"><div class="card"><div class="center" style="margin-bottom:15px"><div class="muted">Покупка листиков</div><b style="font-size:24px;display:block;margin-top:5px">⭐ Telegram Stars</b></div><div id="shopList"><div class="loading">Загрузка магазина...</div></div></div></div>
+<div id="nftShopTab" class="hidden"><div class="card"><div class="muted" style="margin-bottom:12px">Покупай подарки за кленовые листики. После покупки подарок исчезнет из магазина.</div><div id="nftList"></div></div></div>
+<div id="casesShopTab" class="hidden"><div id="casesList"><div class="loading">Загрузка кейсов...</div></div></div>
+</section>
+
+<section id="caseDetailPage" class="hidden">
+<button class="back-btn" onclick="closeCaseDetail()">← Назад к кейсам</button>
+<div class="title" id="caseDetailTitle" style="margin-top:0">🎲 Кейс</div>
+<div class="card">
+<div class="case-cost" id="caseDetailCost"></div>
+<div id="reelWrap" class="reel-wrap hidden"><div class="reel-marker"></div><div id="reelTrack" class="reel-track"></div></div>
+<div id="reelResult" class="reel-result hidden"></div>
+<button id="caseOpenBtn" class="primary" style="width:100%" onclick="openCase()">Открыть кейс</button>
+</div>
+<div class="title" style="font-size:18px">🎁 Все призы кейса</div>
+<div id="casePrizeList" class="card"></div>
+</section>
+
+<section id="inventoryPage" class="hidden">
+<div class="title">🎒 Инвентарь</div>
+<div id="inventoryList" class="card"><div class="loading">Загрузка инвентаря...</div></div>
+</section>
+</div>
+
+<div class="nav"><button class="active" onclick="showPage('homePage',this)">🏠<br>Главная</button><button onclick="showPage('tasksPage',this)">📋<br>Задания</button><button onclick="showPage('gamesPage',this)">🎮<br>Игры</button><button onclick="showPage('shopPage',this)">🛒<br>Магазин</button><button onclick="showPage('inventoryPage',this);loadInventory()">🎒<br>Инвентарь</button></div>
+
+<script>
+const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
+const headers={};const tid=tg?.initDataUnsafe?.user?.id;if(tid)headers['x-telegram-id']=String(tid);
+const refCode=tg?.initDataUnsafe?.start_param;if(refCode)headers['x-ref-code']=String(refCode);
+let balance=0,bet=50,mines=3,gameId=null,gameActive=false;
+async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{'Content-Type':'application/json',...headers,...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.error||'Ошибка запроса');return d}
+function msg(t){const e=document.getElementById('message');e.textContent=t;clearTimeout(msg.timer);msg.timer=setTimeout(()=>e.textContent='',3500)}
+function updateBalance(v){balance=Number(v)||0;['topBalance','mainBalance','gameBalance'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=balance.toLocaleString('ru-RU')})}
+function esc(t){return String(t??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#039;")}
+async function loadUser(){try{updateBalance((await api('/api/me')).balance)}catch(e){msg(e.message)}}
+async function getDaily(){const b=document.getElementById('dailyBtn');b.disabled=true;try{const d=await api('/api/daily',{method:'POST',body:'{}'});updateBalance(d.balance);b.textContent='Бонус получен';msg('🎉 Получено 2500 листиков!')}catch(e){msg(e.message);b.disabled=false}}
+function taskHtml(a){return a.length?a.map(t=>`<div class="task"><div class="info"><b>${esc(t.title)}</b><div class="reward">🍁 +${t.reward}</div></div><div style="display:flex;gap:8px">${t.channel_url?`<button class="blue" onclick="openChannel('${esc(t.channel_url)}')">Открыть</button>`:''}<button class="green" onclick="claimTask(${t.id},this)">Получить</button></div></div>`).join(''):'<div class="muted center">Заданий пока нет</div>'}
+function openChannel(url){if(tg?.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank')}
+async function loadTasks(){try{const a=await api('/api/tasks');document.getElementById('tasksList').innerHTML=taskHtml(a)}catch{document.getElementById('tasksList').innerHTML='<div class="muted">Не удалось загрузить задания</div>'}}
+async function claimTask(id,b){b.disabled=true;try{const d=await api('/api/tasks/'+id+'/claim',{method:'POST'});updateBalance(d.balance);msg('🍁 Награда получена!');loadTasks()}catch(e){msg(e.message);b.disabled=false}}
+let referralData=null;
+async function loadReferralInfo(){try{referralData=await api('/api/referral/info');renderReferralTiers()}catch{document.getElementById('referralTiers').innerHTML='<div class="muted">Не удалось загрузить рефералов</div>'}}
+function renderReferralTiers(){
+const d=referralData;if(!d)return;
+const noun=n=>n===1?'реферал':(n>=2&&n<=4?'реферала':'рефералов');
+document.getElementById('referralTiers').innerHTML=`<div class="muted" style="margin-bottom:10px">Подтверждено рефералов: ${d.confirmedCount}</div>`+d.tiers.map(t=>`<div class="task"><div class="info"><b>${t.required} ${noun(t.required)}</b><div class="reward">🍁 +${Number(t.reward).toLocaleString('ru-RU')}</div></div><button class="green" ${t.claimed||!t.claimable?'disabled':''} onclick="claimReferralTier(${t.required},this)">${t.claimed?'Получено':'Получить'}</button></div>`).join('');
+}
+function showReferralLink(){if(!referralData){msg('Загрузка...');loadReferralInfo().then(()=>{if(referralData){document.getElementById('referralLinkText').textContent=referralData.link;document.getElementById('referralLinkBox').classList.remove('hidden')}});return}document.getElementById('referralLinkText').textContent=referralData.link;document.getElementById('referralLinkBox').classList.remove('hidden')}
+function copyReferralLink(){if(!referralData)return;const link=referralData.link;navigator.clipboard?.writeText(link).then(()=>msg('🍁 Ссылка скопирована')).catch(()=>msg(link))}
+async function claimReferralTier(tier,b){b.disabled=true;try{const d=await api('/api/referral/claim',{method:'POST',body:JSON.stringify({tier})});updateBalance(d.balance);msg('🍁 Награда за рефералов получена!');await loadReferralInfo()}catch(e){msg(e.message);b.disabled=false}}
+async function loadShop(){
+  try{
+    const d=await api('/api/shop');
+    const a=[...(d.packages||[])].filter((p,i,x)=>i===x.findIndex(q=>Number(q.stars)===Number(p.stars)));
+    document.getElementById('shopList').innerHTML=a.length
+      ? a.map(p=>`<div class="shop"><div class="info"><b>🍁 ${Number(p.leaves).toLocaleString('ru-RU')} листиков</b><div class="price">⭐ ${p.stars} Stars</div></div><button class="blue" onclick="buyPackage(${p.stars})">Купить</button></div>`).join('')
+      : '<div class="muted center">Пакеты пока не настроены</div>';
+
+    loadNfts();
+  }catch(e){msg(e.message)}
+}
+
+let nftProducts=[
+  {id:'vice-143868',name:'Vice Cream #143868',url:'https://t.me/nft/ViceCream-143868',price:2500000},
+  {id:'pool-67988',name:'Pool Float #67988',url:'https://t.me/nft/PoolFloat-67988',price:2500000},
+  {id:'vice-314974',name:'Vice Cream #314974',url:'https://t.me/nft/ViceCream-314974',price:2500000},
+  {id:'candle-10719',name:'Love Candle #10719',url:'https://t.me/nft/LoveCandle-10719',price:5000000},
+  {id:'muffin-30347',name:'Bunny Muffin #30347',url:'https://t.me/nft/BunnyMuffin-30347',price:5000000}
+];
+
+function loadNfts(){
+  document.getElementById('nftList').innerHTML=nftProducts.map(n=>`
+    <div class="shop">
+      <div class="info">
+        <b>🎁 ${n.name}</b>
+        <div class="price">🍁 ${Number(n.price).toLocaleString('ru-RU')} листиков</div>
+        <button style="margin-top:9px;padding:9px 11px" onclick="viewNft('${n.url}')">Посмотреть подарок</button>
+      </div>
+      <button class="blue" onclick="buyNft('${n.id}')">Купить</button>
+    </div>
+  `).join('');
+}
+
+function viewNft(url){
+  if(tg?.openTelegramLink) tg.openTelegramLink(url);
+  else window.open(url,'_blank');
+}
+
+async function buyNft(id){
+  try{
+    const d=await api('/api/shop/nft',{
+      method:'POST',
+      body:JSON.stringify({id})
+    });
+    updateBalance(d.balance);
+    nftProducts=nftProducts.filter(n=>n.id!==id);loadNfts();msg('🎁 Подарок куплен. Напишите в личные сообщения @tutananas');
+  }catch(e){
+    msg(e.message);
+  }
+}
+async function buyPackage(stars){try{const d=await api('/api/shop/invoice',{method:'POST',body:JSON.stringify({stars})});if(!d.invoiceLink)throw Error('Ссылка на оплату не получена');if(tg?.openInvoice){tg.openInvoice(d.invoiceLink,s=>{if(s==='paid'){msg('⭐ Оплата прошла!');setTimeout(loadUser,1500)}else if(s==='cancelled')msg('Оплата отменена');else if(s==='failed')msg('Оплата не прошла')})}else window.open(d.invoiceLink,'_blank')}catch(e){msg(e.message)}}
+function setBet(v){bet=Number(v)||0;const input=document.getElementById('betInput');if(input)input.value=bet;document.querySelectorAll('#minesPage .grid:not(.bombs) button').forEach(b=>b.classList.remove('selected'));const p=document.getElementById('bet'+bet);if(p)p.classList.add('selected')}
+function setMines(v){mines=v;document.querySelectorAll('.bombs button').forEach(b=>b.classList.remove('selected'));document.getElementById('bomb'+v).classList.add('selected')}
+function initBombs(){const g=document.getElementById('bombGrid');for(let i=1;i<=12;i++){const b=document.createElement('button');b.id='bomb'+i;b.textContent=i;b.onclick=()=>setMines(i);if(i===3)b.classList.add('selected');g.appendChild(b)}}
+async function startGame(){if(gameActive)return;const inputVal=Number(document.getElementById('betInput').value);if(!inputVal||inputVal<1){msg('Введите корректную ставку');return}bet=inputVal;try{const d=await api('/api/games/mines',{method:'POST',body:JSON.stringify({bet,mines})});gameId=d.gameId;gameActive=true;updateBalance(d.balance);document.getElementById('startBtn').disabled=true;document.getElementById('gameArea').classList.remove('hidden');document.getElementById('minesWinAmount').textContent=bet.toLocaleString('ru-RU');createGrid()}catch(e){msg(e.message)}}
+function createGrid(){const g=document.getElementById('mineGrid');g.innerHTML='';for(let i=0;i<25;i++){const b=document.createElement('button');b.className='cell';b.onclick=()=>openCell(i,b);g.appendChild(b)}}
+async function openCell(cell,b){if(!gameActive||b.classList.contains('open'))return;try{const d=await api('/api/games/mines/'+gameId+'/open',{method:'POST',body:JSON.stringify({cell})});updateBalance(d.balance);if(d.lost){b.classList.add('bomb');b.textContent='💣';gameActive=false;msg('💥 Ты попался на бомбу!');endGame();return}b.classList.add('open');b.textContent='🍁';const mult=Number(d.state.multiplier);document.getElementById('minesWinAmount').textContent=Math.floor(bet*mult).toLocaleString('ru-RU');msg('Множитель: x'+mult.toFixed(2))}catch(e){msg(e.message)}}
+async function cashOut(){
+  if(!gameActive||!gameId)return;
+  try{
+    const d=await api('/api/games/mines/'+gameId+'/cashout',{method:'POST',body:'{}'});
+    gameActive=false;
+    updateBalance(d.balance);
+    msg('🍁 Выигрыш: '+Number(d.win||d.payout||0).toLocaleString('ru-RU')+' листиков');
+    endGame();
+  }catch(e){msg(e.message)}
+}
+function endGame(){document.getElementById('startBtn').disabled=false}
+function showShopTab(tab){
+  const nft=tab==='nft',cases=tab==='cases',leaves=tab==='leaves';
+  document.getElementById('leavesShopTab').classList.toggle('hidden',!leaves);
+  document.getElementById('nftShopTab').classList.toggle('hidden',!nft);
+  document.getElementById('casesShopTab').classList.toggle('hidden',!cases);
+  document.getElementById('leavesTab').classList.toggle('active',leaves);
+  document.getElementById('nftTab').classList.toggle('active',nft);
+  document.getElementById('casesTab').classList.toggle('active',cases);
+  if(cases && !casesLoaded) loadCases();
+}
+function showGameTab(tab){
+  document.getElementById('minesSubPage').classList.toggle('hidden',tab!=='mines');
+  document.getElementById('crashSubPage').classList.toggle('hidden',tab!=='crash');
+  document.getElementById('cardsSubPage').classList.toggle('hidden',tab!=='cards');
+  document.getElementById('minesTab').classList.toggle('active',tab==='mines');
+  document.getElementById('crashTab').classList.toggle('active',tab==='crash');
+  document.getElementById('cardsTab').classList.toggle('active',tab==='cards');
+}
+let cardsBet=50,cardsGameId=null,cardsGameActive=false,cardsMultiplier=1;
+function setCardsBet(v){cardsBet=Number(v)||0;const input=document.getElementById('cardsBetInput');if(input)input.value=cardsBet;document.querySelectorAll('#cardsSubPage .grid button').forEach(b=>b.classList.remove('selected'));const p=document.getElementById('cardsBet'+cardsBet);if(p)p.classList.add('selected')}
+async function startCardsGame(){
+  if(cardsGameActive)return;
+  const inputVal=Number(document.getElementById('cardsBetInput').value);
+  if(!inputVal||inputVal<1){msg('Введите корректную ставку');return}
+  cardsBet=inputVal;
+  try{
+    const d=await api('/api/games/cards',{method:'POST',body:JSON.stringify({bet:cardsBet})});
+    cardsGameId=d.gameId;cardsGameActive=true;cardsMultiplier=1;
+    updateBalance(d.balance);
+    document.getElementById('cardsStartBtn').disabled=true;
+    document.getElementById('cardsArea').classList.remove('hidden');
+    document.getElementById('cardsWinAmount').textContent=cardsBet.toLocaleString('ru-RU');
+    document.getElementById('cardsMultiplierText').textContent='—';
+    document.getElementById('cardsCashoutBtn').classList.add('hidden');
+    createCardsRound();
+  }catch(e){msg(e.message)}
+}
+function createCardsRound(){
+  const g=document.getElementById('cardsGrid');
+  g.innerHTML='';
+  for(let i=0;i<3;i++){
+    const b=document.createElement('button');
+    b.className='cell';
+    b.style.height='90px';
+    b.style.fontSize='34px';
+    b.textContent='🃏';
+    b.onclick=()=>pickCard(i,b);
+    g.appendChild(b);
+  }
+}
+async function pickCard(index,btn){
+  if(!cardsGameActive)return;
+  document.querySelectorAll('#cardsGrid button').forEach(b=>b.disabled=true);
+  try{
+    const d=await api('/api/games/cards/'+cardsGameId+'/pick',{method:'POST',body:JSON.stringify({cardIndex:index})});
+    if(d.lost){
+      btn.classList.add('bomb');btn.textContent='💥';
+      document.querySelectorAll('#cardsGrid button').forEach((b,i)=>{if(i!==index&&i===d.losingIndex){b.classList.add('bomb');b.textContent='💥'}});
+      cardsGameActive=false;
+      msg('💥 Не повезло, карта была проигрышной!');
+      updateBalance(d.balance);
+      endCardsGame();
+      return;
+    }
+    btn.classList.add('open');btn.textContent='🍁';
+    cardsMultiplier=Number(d.state.multiplier);
+    document.getElementById('cardsWinAmount').textContent=Math.floor(cardsBet*cardsMultiplier).toLocaleString('ru-RU');
+    document.getElementById('cardsMultiplierText').textContent='x'+cardsMultiplier.toFixed(2);
+    document.getElementById('cardsCashoutBtn').classList.remove('hidden');
+    if(d.capped){
+      cardsGameActive=false;
+      updateBalance(d.balance);
+      msg('🏆 Достигнут максимум x'+cardsMultiplier.toFixed(2)+'! Выигрыш '+Number(d.win).toLocaleString('ru-RU')+' листиков забран автоматически');
+      document.getElementById('cardsCashoutBtn').classList.add('hidden');
+      endCardsGame();
+      return;
+    }
+    msg('Множитель: x'+cardsMultiplier.toFixed(2));
+    setTimeout(createCardsRound,650);
+  }catch(e){
+    msg(e.message);
+    document.querySelectorAll('#cardsGrid button').forEach(b=>b.disabled=false);
+  }
+}
+async function cardsCashOut(){
+  if(!cardsGameActive||!cardsGameId)return;
+  try{
+    const d=await api('/api/games/cards/'+cardsGameId+'/cashout',{method:'POST',body:'{}'});
+    cardsGameActive=false;
+    updateBalance(d.balance);
+    msg('🍁 Выигрыш: '+Number(d.win||0).toLocaleString('ru-RU')+' листиков');
+    endCardsGame();
+  }catch(e){msg(e.message)}
+}
+function endCardsGame(){document.getElementById('cardsStartBtn').disabled=false}
+
+// ===== Кейсы =====
+const GIFT_ANIM={
+  'candle-10719':'gifts/love-candle.json',
+  'muffin-30347':'gifts/bunny-muffin.json',
+  'vice-143868':'gifts/vice-cream-bamboo.json',
+  'vice-314974':'gifts/vice-cream-cup.json',
+  'pool-67988':'gifts/pool-float-giraffe.json',
+};
+const lottieCache={};
+function mountGiftAnim(container,nftItemId,emojiFallback){
+  const path=GIFT_ANIM[nftItemId];
+  if(path&&window.lottie){
+    try{
+      container.textContent='';
+      lottie.loadAnimation({container,renderer:'svg',loop:true,autoplay:true,path});
+      return;
+    }catch(e){}
+  }
+  container.textContent=emojiFallback||'🎁';
+}
+let casesData=[],casesLoaded=false,caseOpening=false,currentCaseId=null;
+async function loadCases(){
+  try{
+    const d=await api('/api/cases');
+    casesData=d.cases||[];
+    casesLoaded=true;
+    renderCases();
+  }catch(e){
+    document.getElementById('casesList').innerHTML='<div class="muted">Не удалось загрузить кейсы</div>';
+  }
+}
+function renderCases(){
+  document.getElementById('casesList').innerHTML=casesData.map(c=>{
+    const preview=c.items.slice(0,4).map(i=>`<div class="gift-icon" data-nft="${esc(i.nftItemId||'')}" data-emoji="${esc(i.emoji)}"></div>`).join('');
+    return `
+    <div class="case-card">
+      <div style="font-size:18px;font-weight:bold">🎲 ${esc(c.name)}</div>
+      <div class="case-cost">🍁 ${Number(c.cost).toLocaleString('ru-RU')} листиков</div>
+      <div class="case-preview">${preview}</div>
+      <button class="primary" style="width:100%" onclick="openCaseDetail('${c.id}')">Открыть кейс</button>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('#casesList [data-nft]').forEach(el=>mountGiftAnim(el,el.dataset.nft,el.dataset.emoji));
+}
+function openCaseDetail(caseId){
+  const c=casesData.find(x=>x.id===caseId);
+  if(!c)return;
+  currentCaseId=caseId;
+  document.getElementById('caseDetailTitle').textContent='🎲 '+c.name;
+  document.getElementById('caseDetailCost').textContent='🍁 '+Number(c.cost).toLocaleString('ru-RU')+' листиков';
+  document.getElementById('reelWrap').classList.add('hidden');
+  document.getElementById('reelResult').classList.add('hidden');
+  document.getElementById('caseOpenBtn').disabled=false;
+  renderCasePrizes(c.items);
+  document.querySelectorAll('.app > section').forEach(s=>s.classList.add('hidden'));
+  document.getElementById('caseDetailPage').classList.remove('hidden');
+  window.scrollTo(0,0);
+}
+function closeCaseDetail(){
+  document.getElementById('caseDetailPage').classList.add('hidden');
+  document.getElementById('shopPage').classList.remove('hidden');
+  showShopTab('cases');
+}
+function renderCasePrizes(items){
+  const wrap=document.getElementById('casePrizeList');
+  wrap.innerHTML=items.map(it=>`
+    <div class="prize-row">
+      <div class="gift-icon" data-nft="${esc(it.nftItemId||'')}" data-emoji="${esc(it.emoji)}"></div>
+      <div class="prize-info">
+        <div class="prize-name">${esc(it.name)}</div>
+        <div class="prize-chance">Шанс выпадения: ${it.chance}%</div>
+      </div>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-nft]').forEach(el=>mountGiftAnim(el,el.dataset.nft,el.dataset.emoji));
+}
+async function openCase(){
+  if(caseOpening||!currentCaseId)return;
+  const caseDef=casesData.find(c=>c.id===currentCaseId);
+  if(!caseDef)return;
+  caseOpening=true;
+  document.getElementById('caseOpenBtn').disabled=true;
+  document.getElementById('reelResult').classList.add('hidden');
+  try{
+    const d=await api('/api/cases/'+currentCaseId+'/open',{method:'POST',body:'{}'});
+    runReel(caseDef,d.result,d.balance);
+  }catch(e){
+    msg(e.message);
+    caseOpening=false;
+    document.getElementById('caseOpenBtn').disabled=false;
+  }
+}
+function runReel(caseDef,result,newBalance){
+  const wrap=document.getElementById('reelWrap');
+  const track=document.getElementById('reelTrack');
+  wrap.classList.remove('hidden');
+  track.style.transition='none';
+  track.style.transform='translateX(0)';
+  const targetIndex=28;
+  const total=34;
+  let html='';
+  for(let i=0;i<total;i++){
+    const it=i===targetIndex?result:caseDef.items[Math.floor(Math.random()*caseDef.items.length)];
+    html+=`<div class="reel-item">${it.emoji}</div>`;
+  }
+  track.innerHTML=html;
+  const itemW=96;
+  const wrapW=wrap.offsetWidth;
+  const offset=targetIndex*itemW+itemW/2-wrapW/2;
+  requestAnimationFrame(()=>{
+    track.style.transition='transform 3.2s cubic-bezier(0.12,0.75,0.12,1)';
+    track.style.transform='translateX(-'+offset+'px)';
+  });
+  setTimeout(()=>{
+    const resEl=document.getElementById('reelResult');
+    resEl.innerHTML='';
+    const icon=document.createElement('div');
+    icon.className='gift-icon reveal-icon';
+    resEl.appendChild(icon);
+    const label=document.createElement('div');
+    if(result.type==='nft'){
+      label.textContent='🎉 Выпал подарок: '+result.name+'! Забери его в разделе Инвентарь.';
+      mountGiftAnim(icon,result.nftItemId,result.emoji);
+    }else{
+      label.textContent='🎉 Выпало: '+Number(result.amount).toLocaleString('ru-RU')+' листиков!';
+      icon.textContent=result.emoji||'🍁';
+    }
+    resEl.appendChild(label);
+    resEl.classList.remove('hidden');
+    updateBalance(newBalance);
+    caseOpening=false;
+    document.getElementById('caseOpenBtn').disabled=false;
+  },3300);
+}
+
+// ===== Инвентарь =====
+async function loadInventory(){
+  try{
+    const d=await api('/api/inventory');
+    renderInventory(d.items||[]);
+  }catch(e){
+    document.getElementById('inventoryList').innerHTML='<div class="muted">Не удалось загрузить инвентарь</div>';
+  }
+}
+function renderInventory(items){
+  document.getElementById('inventoryList').innerHTML=items.length?items.map(it=>`
+    <div class="inv-item">
+      <div class="gift-icon" data-nft="${esc(it.item_id||'')}" data-emoji="${esc(it.emoji)}"></div>
+      <div class="info"><b>${esc(it.item_name)}</b></div>
+      <div style="display:flex;gap:8px">
+        <button class="blue" onclick="sellInventoryItem(${it.id},this)">Продать</button>
+        <button class="green" onclick="withdrawInventoryItem(${it.id},this)">Вывести</button>
+      </div>
+    </div>
+  `).join(''):'<div class="muted center">Инвентарь пуст. Открой кейс в магазине!</div>';
+  document.querySelectorAll('#inventoryList [data-nft]').forEach(el=>mountGiftAnim(el,el.dataset.nft,el.dataset.emoji));
+}
+async function sellInventoryItem(id,btn){
+  btn.disabled=true;
+  const other=btn.parentElement.querySelector('.green');if(other)other.disabled=true;
+  try{
+    const d=await api('/api/inventory/'+id+'/sell',{method:'POST',body:'{}'});
+    updateBalance(d.balance);
+    msg('🍁 Продано за '+Number(d.win).toLocaleString('ru-RU')+' листиков');
+    loadInventory();
+  }catch(e){
+    msg(e.message);
+    btn.disabled=false;
+    if(other)other.disabled=false;
+  }
+}
+async function withdrawInventoryItem(id,btn){
+  btn.disabled=true;
+  const other=btn.parentElement.querySelector('.blue');if(other)other.disabled=true;
+  try{
+    await api('/api/inventory/'+id+'/withdraw',{method:'POST',body:'{}'});
+    msg('🎁 Заявка на вывод отправлена. Напишите в личные сообщения @tutananas');
+    loadInventory();
+  }catch(e){
+    msg(e.message);
+    btn.disabled=false;
+    if(other)other.disabled=false;
+  }
+}
+let crashTimer=null,crashRound=false,crashBet=50,crashCashed=false,crashAt=1,crashStart=0;
+function setCrashBet(v){document.getElementById('crashBetInput').value=v;crashBet=v}
+function generateCrashPoint(){
+  const houseEdge=0.04;
+  if(Math.random()<houseEdge)return 1.00;
+  const scale=0.9;
+  const point=1+(-Math.log(1-Math.random()))*scale;
+  return Math.min(point,25);
+}
+function startCrashRound(){
+  crashRound=true;crashCashed=false;crashAt=generateCrashPoint();crashStart=Date.now();
+  document.getElementById('crashMultiplier').textContent='1.00x';
+  document.getElementById('crashStatus').textContent='Раунд начался';
+  document.getElementById('crashBetBtn').disabled=true;
+  document.getElementById('crashCashoutBtn').classList.remove('hidden');
+  clearInterval(crashTimer);
+  crashTimer=setInterval(()=>{
+    const t=(Date.now()-crashStart)/1000;
+    const m=Math.min(crashAt,1+Math.pow(t,1.5)*0.15);
+    document.getElementById('crashMultiplier').textContent=m.toFixed(2)+'x';
+    if(m>=crashAt){
+      clearInterval(crashTimer);
+      crashRound=false;
+      document.getElementById('crashStatus').textContent='💥 Краш на x'+crashAt.toFixed(2)+'! Сделайте новую ставку';
+      document.getElementById('crashCashoutBtn').classList.add('hidden');
+      document.getElementById('crashBetBtn').disabled=false;
+    }
+  },100)
+}
+async function placeCrashBet(){
+  const v=Number(document.getElementById('crashBetInput').value);
+  if(!v||v<1){msg('Введите корректную ставку');return}
+  if(crashRound){msg('Раунд уже идёт');return}
+  try{
+    const d=await api('/api/games/crash/bet',{method:'POST',body:JSON.stringify({bet:v})});
+    crashBet=v;
+    updateBalance(d.balance);
+    msg('🍁 Ставка принята');
+    startCrashRound();
+  }catch(e){msg(e.message)}
+}
+async function cashoutCrash(){
+  if(crashCashed)return;
+  const btn=document.getElementById('crashCashoutBtn');
+  if(btn.disabled)return;
+  btn.disabled=true;
+  try{
+    const m=parseFloat(document.getElementById('crashMultiplier').textContent);
+    const d=await api('/api/games/crash/cashout',{method:'POST',body:JSON.stringify({multiplier:m})});
+    crashCashed=true;
+    crashRound=false;
+    clearInterval(crashTimer);
+    updateBalance(d.balance);
+    const win=Number(d.win||d.payout||Math.floor(crashBet*m));
+    document.getElementById('crashCashoutBtn').classList.add('hidden');
+    document.getElementById('crashBetBtn').disabled=false;
+    document.getElementById('crashStatus').textContent='Забрано на x'+m.toFixed(2)+'! Сделайте новую ставку';
+    msg('🍁 Выигрыш: '+win.toLocaleString('ru-RU')+' листиков');
+  }catch(e){
+    msg(e.message);
+    crashRound=false;
+    crashCashed=false;
+    clearInterval(crashTimer);
+    document.getElementById('crashCashoutBtn').classList.add('hidden');
+    document.getElementById('crashBetBtn').disabled=false;
+    document.getElementById('crashStatus').textContent='Раунд завершён. Сделайте новую ставку';
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+function showPage(id,b){document.querySelectorAll('section').forEach(s=>s.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
+initBombs();setBet(50);setCardsBet(50);loadUser();loadTasks();loadShop();loadReferralInfo();
+</script>
+</body>
+</html>

@@ -58,6 +58,7 @@ const MINES_HOUSE_EDGE = 0.97; // 3% преимущество казино
 const CARDS_PER_ROUND = 3; // из них 1 проигрышная
 const CARDS_BASE_MULTIPLIER = 1.5; // множитель за первый успешный раунд
 const CARDS_HOUSE_EDGE = 0.97; // 3% преимущество казино
+const CARDS_MAX_MULTIPLIER = 9.99; // потолок: выигрыш авто-кэшаутится при достижении
 
 // Множитель в игре "Мины" — стандартная комбинаторная формула
 function minesMultiplier(minesCount: number, opened: number): number {
@@ -1422,10 +1423,9 @@ app.post('/api/games/mines/:id/cashout', async (req: any, reply) => {
 // Забрать выигрыш можно после любого успешного раунда.
 
 function cardsNextMultiplier(currentMultiplier: number, round: number): number {
-  if (round === 0) {
-    return CARDS_BASE_MULTIPLIER * CARDS_HOUSE_EDGE;
-  }
-  return currentMultiplier * 2;
+  const raw = round === 0 ? CARDS_BASE_MULTIPLIER : currentMultiplier * 2;
+  const withEdge = raw * CARDS_HOUSE_EDGE;
+  return Math.min(withEdge, CARDS_MAX_MULTIPLIER);
 }
 
 // Начать игру
@@ -1522,6 +1522,36 @@ app.post('/api/games/cards/:id/pick', async (req: any, reply) => {
 
     const newRound = game.round + 1;
     const newMultiplier = cardsNextMultiplier(Number(game.multiplier), game.round);
+    const capped = newMultiplier >= CARDS_MAX_MULTIPLIER;
+
+    if (capped) {
+      // Достигнут потолок множителя — авто-кэшаут, раунд завершается выигрышем
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const payout = Math.floor(Number(game.bet) * newMultiplier);
+        await client.query(
+          `UPDATE card_games SET round = $1, multiplier = $2, status = 'cashed' WHERE id = $3`,
+          [newRound, newMultiplier, gameId]
+        );
+        await tx(client, u.id, payout, 'cards_win', { gameId, multiplier: newMultiplier, capped: true });
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+      const updated = await user(telegramId);
+      return {
+        lost: false,
+        losingIndex,
+        capped: true,
+        state: { round: newRound, multiplier: newMultiplier },
+        win: Math.floor(Number(game.bet) * newMultiplier),
+        balance: Number(updated.balance),
+      };
+    }
 
     await pool.query(
       `UPDATE card_games SET round = $1, multiplier = $2 WHERE id = $3`,
